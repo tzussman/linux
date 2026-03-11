@@ -136,8 +136,16 @@ int iomap_ioend_writeback_submit(struct iomap_writepage_ctx *wpc, int error)
 {
 	struct iomap_ioend *ioend = wpc->wb_ctx;
 
-	if (!ioend->io_bio.bi_end_io)
+	/*
+	 * Dropbehind invalidation needs task context. Only defer for ioends
+	 * completed by iomap itself; a file system that installs its own
+	 * bi_end_io provides task context for the completion.
+	 */
+	if (!ioend->io_bio.bi_end_io) {
 		ioend->io_bio.bi_end_io = ioend_writeback_end_bio;
+		if (ioend->io_flags & IOMAP_IOEND_DONTCACHE)
+			bio_set_flag(&ioend->io_bio, BIO_COMPLETE_IN_TASK);
+	}
 
 	if (WARN_ON_ONCE(wpc->iomap.flags & IOMAP_F_ANON_WRITE))
 		error = -EIO;
