@@ -1228,6 +1228,9 @@ const char * const vmstat_text[] = {
 	[I(NR_SLAB_UNRECLAIMABLE_B)]		= "nr_slab_unreclaimable",
 	[I(NR_ISOLATED_ANON)]			= "nr_isolated_anon",
 	[I(NR_ISOLATED_FILE)]			= "nr_isolated_file",
+#ifdef CONFIG_CACHE_EXT
+	[I(NR_CACHE_EXT_FILE)]			= "nr_cache_ext_file",
+#endif
 	[I(WORKINGSET_NODES)]			= "workingset_nodes",
 	[I(WORKINGSET_REFAULT_ANON)]		= "workingset_refault_anon",
 	[I(WORKINGSET_REFAULT_FILE)]		= "workingset_refault_file",

@@ -423,6 +423,9 @@ static const unsigned int memcg_node_stat_items[] = {
 #ifdef CONFIG_HUGETLB_PAGE
 	NR_HUGETLB,
 #endif
+#ifdef CONFIG_CACHE_EXT
+	NR_CACHE_EXT_FILE,
+#endif
 };
 
 static const unsigned int memcg_stat_items[] = {
@@ -1575,6 +1578,9 @@ static const struct memory_stat memory_stats[] = {
 	{ "inactive_file",		NR_INACTIVE_FILE		},
 	{ "active_file",		NR_ACTIVE_FILE			},
 	{ "unevictable",		NR_UNEVICTABLE			},
+#ifdef CONFIG_CACHE_EXT
+	{ "cache_ext_file",		NR_CACHE_EXT_FILE		},
+#endif
 	{ "slab_reclaimable",		NR_SLAB_RECLAIMABLE_B		},
 	{ "slab_unreclaimable",		NR_SLAB_UNRECLAIMABLE_B		},
 #ifdef CONFIG_HUGETLB_PAGE

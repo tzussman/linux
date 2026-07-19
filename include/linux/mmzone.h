@@ -244,6 +244,9 @@ enum node_stat_item {
 	NR_SLAB_UNRECLAIMABLE_B,
 	NR_ISOLATED_ANON,	/* Temporary isolated pages from anon lru */
 	NR_ISOLATED_FILE,	/* Temporary isolated pages from file lru */
+#ifdef CONFIG_CACHE_EXT
+	NR_CACHE_EXT_FILE,	/* Pagecache folios owned by a cache_ext policy */
+#endif
 	WORKINGSET_NODES,
 	WORKINGSET_REFAULT_BASE,
 	WORKINGSET_REFAULT_ANON = WORKINGSET_REFAULT_BASE,
