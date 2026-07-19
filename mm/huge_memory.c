@@ -43,6 +43,7 @@
 #include <linux/pagewalk.h>
 
 #include <asm/tlb.h>
+#include "cache_ext.h"
 #include "internal.h"
 #include "swap.h"
 
@@ -4007,6 +4008,16 @@ static int __folio_split(struct folio *folio, unsigned int new_order,
 		VM_WARN_ONCE(ret == -EINVAL, "Tried to split an unsplittable folio");
 		goto out;
 	}
+
+	/*
+	 * A policy-owned folio carries the policy list's extra reference,
+	 * which would make the reference freeze below fail forever. Give
+	 * the folio back to the kernel LRU first; the split then proceeds
+	 * as for any other pagecache folio and the resulting folios stay
+	 * under kernel management (the policy is notified and may re-adopt
+	 * them on later accesses).
+	 */
+	cache_ext_folio_release(folio);
 
 	if (is_anon) {
 		/*
