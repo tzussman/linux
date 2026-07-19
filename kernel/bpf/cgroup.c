@@ -1468,7 +1468,13 @@ static int __cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
 			return -ENOENT;
 		from_atype = to_atype = atype;
 		flags = 0;
-		if (!cgroup_bpf_enabled(atype))
+		/*
+		 * atype is not a compile-time constant here, so the
+		 * static-branch gate cannot be used: asm goto needs the key
+		 * address as an immediate. Read the key count directly;
+		 * this is a query slow path.
+		 */
+		if (!static_key_enabled(&cgroup_bpf_enabled_key[atype]))
 			goto skip_count;
 	} else if (type == BPF_LSM_CGROUP) {
 		if (!effective_query && attr->query.prog_cnt &&
