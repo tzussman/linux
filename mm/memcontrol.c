@@ -4264,6 +4264,14 @@ static int mem_cgroup_css_online(struct cgroup_subsys_state *css)
 	 */
 	xa_store(&mem_cgroup_private_ids, memcg->id.id, memcg, GFP_KERNEL);
 
+	/*
+	 * If an ancestor cgroup has a cache_ext policy attached, this memcg
+	 * is governed by it from the start. The memcg cannot have any
+	 * folios yet. Policy setup failure falls back to the kernel LRU and
+	 * is deliberately not an onlining error.
+	 */
+	cache_ext_memcg_online(memcg);
+
 	return 0;
 free_objcg:
 	for_each_node(nid) {
