@@ -9,8 +9,11 @@
 #ifndef _MM_CACHE_EXT_H
 #define _MM_CACHE_EXT_H
 
+#include <linux/jump_label.h>
 #include <linux/list.h>
+#include <linux/memcontrol.h>
 #include <linux/mutex.h>
+#include <linux/rcupdate.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
@@ -65,8 +68,28 @@ struct cache_ext_domain {
 	struct rcu_head rcu;
 };
 
+DECLARE_STATIC_KEY_FALSE(cache_ext_enabled_key);
+
+/*
+ * Look up the policy domain governing @memcg, if any. The returned domain
+ * is only stable for the duration of the RCU read-side critical section;
+ * anything that must outlive it has to be pinned through place/claim.
+ */
+static inline struct cache_ext_domain *
+mem_cgroup_cache_ext_domain(struct mem_cgroup *memcg)
+{
+	if (!memcg)
+		return NULL;
+	return rcu_dereference(memcg->cache_ext);
+}
+
 struct cache_ext_domain *cache_ext_domain_alloc(struct mem_cgroup *memcg);
 void cache_ext_domain_free(struct cache_ext_domain *domain);
+
+void cache_ext_domain_publish(struct mem_cgroup *memcg,
+			      struct cache_ext_domain *domain);
+struct cache_ext_domain *cache_ext_domain_unpublish(struct mem_cgroup *memcg);
+void cache_ext_domain_release(struct cache_ext_domain *domain, bool sync);
 
 int cache_ext_list_create(struct cache_ext_domain *domain);
 

@@ -24,6 +24,7 @@
 #include <linux/page-flags.h>
 #include <linux/shrinker.h>
 
+struct cache_ext_domain;
 struct mem_cgroup;
 struct obj_cgroup;
 struct page;
@@ -233,6 +234,15 @@ struct mem_cgroup {
 
 	/* vmpressure notifications */
 	struct vmpressure vmpressure;
+
+#ifdef CONFIG_CACHE_EXT
+	/*
+	 * State of the BPF page cache eviction policy governing this memcg,
+	 * or NULL if folios of this memcg are managed by the kernel LRU.
+	 * Written under cgroup_mutex, read under RCU.
+	 */
+	struct cache_ext_domain __rcu *cache_ext;
+#endif
 
 	/*
 	 * Should the OOM killer kill all belonging tasks, had it kill one?

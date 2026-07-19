@@ -23,6 +23,9 @@
  *    eviction, page cache removal, policy teardown — goes through claim,
  *    so exactly one of them succeeds no matter how they race.
  */
+#include <linux/bpf.h>
+#include <linux/cache_ext.h>
+#include <linux/cgroup.h>
 #include <linux/memcontrol.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
@@ -30,6 +33,12 @@
 
 #include "cache_ext.h"
 #include "internal.h"
+
+/*
+ * Enabled while at least one domain is published anywhere in the system;
+ * keeps every hook in the page cache paths behind a static branch.
+ */
+DEFINE_STATIC_KEY_FALSE(cache_ext_enabled_key);
 
 /*
  * Set on the local CPU only while a policy's folio_added() callback runs.
@@ -295,4 +304,107 @@ void cache_ext_domain_drain(struct cache_ext_domain *domain)
 		for (i = 0; i < nr; i++)
 			folio_putback_lru(batch[i]);
 	} while (nr);
+}
+
+/**
+ * cache_ext_domain_publish - make a domain govern a memcg.
+ * @memcg: the memcg.
+ * @domain: fully initialized domain; the policy's init() has already run.
+ *
+ * Pins the memcg and makes the domain visible to the page cache hooks.
+ * Caller holds cgroup_mutex, which serializes all publish/unpublish
+ * against each other.
+ */
+void cache_ext_domain_publish(struct mem_cgroup *memcg,
+			      struct cache_ext_domain *domain)
+{
+	css_get(&memcg->css);
+	rcu_assign_pointer(memcg->cache_ext, domain);
+	static_branch_inc(&cache_ext_enabled_key);
+}
+
+/**
+ * cache_ext_domain_unpublish - detach a memcg's domain, if any.
+ * @memcg: the memcg.
+ *
+ * Caller holds cgroup_mutex. Returns the domain that was governing
+ * @memcg, no longer reachable by new RCU readers, or NULL. The caller
+ * must hand a returned domain to cache_ext_domain_release().
+ */
+struct cache_ext_domain *cache_ext_domain_unpublish(struct mem_cgroup *memcg)
+{
+	struct cache_ext_domain *domain;
+
+	domain = rcu_dereference_protected(memcg->cache_ext,
+					   lockdep_is_held(&cgroup_mutex));
+	if (domain)
+		rcu_assign_pointer(memcg->cache_ext, NULL);
+	return domain;
+}
+
+static void cache_ext_domain_teardown(struct cache_ext_domain *domain)
+{
+	/*
+	 * Wait for hook invocations that found the domain before it was
+	 * unpublished. Once they have drained, no new folios can be placed
+	 * and no BPF program of this policy can be entered from this
+	 * domain.
+	 */
+	synchronize_rcu();
+	cache_ext_domain_drain(domain);
+
+	if (domain->map)
+		bpf_map_put(domain->map);
+	css_put(&domain->memcg->css);
+	static_branch_dec(&cache_ext_enabled_key);
+	cache_ext_domain_free(domain);
+}
+
+static void cache_ext_teardown_workfn(struct work_struct *work)
+{
+	struct cache_ext_domain *domain =
+		container_of(work, struct cache_ext_domain, teardown_work);
+
+	cache_ext_domain_teardown(domain);
+}
+
+/**
+ * cache_ext_domain_release - tear down an unpublished domain.
+ * @domain: domain returned by cache_ext_domain_unpublish().
+ * @sync: tear down synchronously instead of deferring to a workqueue.
+ *
+ * Tearing down means waiting out RCU readers, splicing every owned folio
+ * back onto the kernel LRU, and dropping the domain's map and css
+ * references. The deferred flavor exists because detach notifications
+ * arrive under cgroup_mutex, where a synchronize_rcu() would stall every
+ * other cgroup operation in the system.
+ */
+void cache_ext_domain_release(struct cache_ext_domain *domain, bool sync)
+{
+	if (sync) {
+		cache_ext_domain_teardown(domain);
+	} else {
+		INIT_WORK(&domain->teardown_work, cache_ext_teardown_workfn);
+		queue_work(system_dfl_wq, &domain->teardown_work);
+	}
+}
+
+/**
+ * cache_ext_memcg_offline - detach any policy before a memcg goes offline.
+ * @memcg: the memcg being offlined.
+ *
+ * Called from mem_cgroup_css_offline() before the memcg's LRU folios are
+ * reparented, so that folios sitting on policy lists are back under
+ * kernel control (and thus visible to reparenting) first. Offlining is a
+ * slow path and holds cgroup_mutex; the synchronous teardown is fine
+ * here. The struct_ops link's later auto-detach will find no domain and
+ * do nothing.
+ */
+void cache_ext_memcg_offline(struct mem_cgroup *memcg)
+{
+	struct cache_ext_domain *domain;
+
+	domain = cache_ext_domain_unpublish(memcg);
+	if (domain)
+		cache_ext_domain_release(domain, true);
 }

@@ -25,6 +25,7 @@
  * Copyright (C) 2020 Alibaba, Inc, Alex Shi
  */
 
+#include <linux/cache_ext.h>
 #include <linux/cgroup-defs.h>
 #include <linux/page_counter.h>
 #include <linux/memcontrol.h>
@@ -4292,6 +4293,13 @@ offline_kmem:
 static void mem_cgroup_css_offline(struct cgroup_subsys_state *css)
 {
 	struct mem_cgroup *memcg = mem_cgroup_from_css(css);
+
+	/*
+	 * Return policy-owned folios to the kernel LRU before anything
+	 * below starts reparenting: folios sitting on cache_ext lists are
+	 * not on any lruvec list and would be missed.
+	 */
+	cache_ext_memcg_offline(memcg);
 
 	memcg1_css_offline(memcg);
 
