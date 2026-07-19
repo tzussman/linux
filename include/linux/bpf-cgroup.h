@@ -121,7 +121,8 @@ static inline bool cgroup_bpf_is_struct_ops_atype(enum cgroup_bpf_attach_type at
 {
 	return atype == CGROUP_TCP_SOCK_OPS;
 }
-void cgroup_bpf_struct_ops_register(int atype, u32 type_id, void *cfi_stubs, bool mult_trace);
+void cgroup_bpf_struct_ops_register(int atype, u32 type_id,
+				    const struct bpf_struct_ops *st_ops);
 int cgroup_bpf_struct_ops_attach(struct bpf_map *map, const union bpf_attr *attr);
 
 void __init cgroup_bpf_lifetime_notifier_init(void);
@@ -497,8 +498,8 @@ static inline bool cgroup_bpf_is_struct_ops_atype(int atype)
 {
 	return false;
 }
-static inline void cgroup_bpf_struct_ops_register(int atype, u32 type_id, void *cfi_stubs,
-						  bool mult_trace)
+static inline void cgroup_bpf_struct_ops_register(int atype, u32 type_id,
+						  const struct bpf_struct_ops *st_ops)
 {
 }
 static inline int cgroup_bpf_struct_ops_attach(struct bpf_map *map,

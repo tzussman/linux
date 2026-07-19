@@ -2104,6 +2104,21 @@ struct btf_member;
  *		  0 means the struct_ops type does not support cgroup attachment.
  *		  If cgroup_atype is non-zero, the @reg and @unreg must be NULL
  *		  because the attachment/detachment will be handled by the bpf core.
+ * @cg_attach: Optional. Only valid together with @cgroup_atype. Called under
+ *	       cgroup_mutex after the struct_ops map has been added to the
+ *	       cgroup's effective arrays. A subsystem that needs to set up
+ *	       per-cgroup state before it starts dispatching to the struct_ops
+ *	       can do so here; returning an error rolls the attachment back.
+ *	       Note that RCU readers may observe the struct_ops in the
+ *	       effective arrays before @cg_attach has run, so a subsystem that
+ *	       cannot tolerate that must gate dispatch on its own state.
+ * @cg_detach: Optional. Only valid together with @cgroup_atype. Called under
+ *	       cgroup_mutex after the struct_ops map has been removed from the
+ *	       cgroup's effective arrays, on explicit detach, replacement via
+ *	       link update, and cgroup removal. In-flight RCU readers may still
+ *	       be executing struct_ops programs; the subsystem is responsible
+ *	       for waiting out its own readers before tearing down state they
+ *	       might dereference.
  * @free_after_tasks_rcu_gp: Set to true if it needs the bpf core to wait for
  *                           a tasks_rcu gp before freeing the struct_ops map
  *                           and its progs. It is unnecessary if the @unreg
@@ -2131,6 +2146,8 @@ struct bpf_struct_ops {
 	const char *name;
 	struct btf_func_model func_models[BPF_STRUCT_OPS_MAX_NR_MEMBERS];
 	int cgroup_atype;
+	int (*cg_attach)(struct bpf_map *map, struct cgroup *cgrp);
+	void (*cg_detach)(struct bpf_map *map, struct cgroup *cgrp);
 	bool free_after_tasks_rcu_gp;
 	bool free_after_mult_rcu_gp;
 };

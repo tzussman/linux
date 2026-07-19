@@ -27,12 +27,34 @@ EXPORT_SYMBOL(cgroup_bpf_enabled_key);
 static u32 struct_ops_type_id[MAX_CGROUP_BPF_ATTACH_TYPE];
 static void *struct_ops_cfi_stubs[MAX_CGROUP_BPF_ATTACH_TYPE];
 static bool struct_ops_mult_rcu[MAX_CGROUP_BPF_ATTACH_TYPE];
+static const struct bpf_struct_ops *struct_ops_by_atype[MAX_CGROUP_BPF_ATTACH_TYPE];
 
-void cgroup_bpf_struct_ops_register(int atype, u32 type_id, void *cfi_stubs, bool mult_rcu)
+void cgroup_bpf_struct_ops_register(int atype, u32 type_id,
+				    const struct bpf_struct_ops *st_ops)
 {
 	struct_ops_type_id[atype] = type_id;
-	struct_ops_cfi_stubs[atype] = cfi_stubs;
-	struct_ops_mult_rcu[atype] = mult_rcu;
+	struct_ops_cfi_stubs[atype] = st_ops->cfi_stubs;
+	struct_ops_mult_rcu[atype] = st_ops->free_after_mult_rcu_gp;
+	struct_ops_by_atype[atype] = st_ops;
+}
+
+static int cgroup_struct_ops_notify_attach(struct bpf_map *map, struct cgroup *cgrp,
+					   enum cgroup_bpf_attach_type atype)
+{
+	const struct bpf_struct_ops *st_ops = struct_ops_by_atype[atype];
+
+	if (!st_ops->cg_attach)
+		return 0;
+	return st_ops->cg_attach(map, cgrp);
+}
+
+static void cgroup_struct_ops_notify_detach(struct bpf_map *map, struct cgroup *cgrp,
+					    enum cgroup_bpf_attach_type atype)
+{
+	const struct bpf_struct_ops *st_ops = struct_ops_by_atype[atype];
+
+	if (st_ops->cg_detach)
+		st_ops->cg_detach(map, cgrp);
 }
 
 static enum cgroup_bpf_attach_type find_atype_by_struct_ops_id(u32 type_id)
@@ -350,6 +372,8 @@ static void cgroup_struct_ops_link_detach_wake(struct bpf_cgroup_link *link, boo
 static void bpf_cgroup_link_auto_detach(struct bpf_cgroup_link *link)
 {
 	if (link->map) {
+		cgroup_struct_ops_notify_detach(link->map, link->cgroup,
+						bpf_struct_ops_map_cgroup_atype(link->map));
 		cgroup_struct_ops_link_detach_wake(link, true);
 	} else {
 		if (link->link.prog->expected_attach_type == BPF_LSM_CGROUP)
@@ -2929,6 +2953,7 @@ static int __cgroup_struct_ops_link_detach(struct bpf_link *link, bool wake_poll
 	}
 
 	hlist_del(&pl->node);
+	cgroup_struct_ops_notify_detach(map, cgrp, atype);
 	cgroup_struct_ops_link_detach_wake(cg_link, wake_poll);
 	cgrp->bpf.revisions[atype]++;
 
@@ -3029,6 +3054,26 @@ static int cgroup_struct_ops_link_update(struct bpf_link *link, struct bpf_map *
 	bpf_map_inc(new_map);
 	WRITE_ONCE(cg_link->map, new_map);
 	replace_effective_prog(cgrp, atype, pl);
+
+	err = cgroup_struct_ops_notify_attach(new_map, cgrp, atype);
+	if (err) {
+		/*
+		 * Revert to the old map. The new map's failed attach may have
+		 * left the subsystem's per-cgroup state resolved against the
+		 * new map (or unwound as if nothing were attached here), so
+		 * after restoring the effective arrays, re-notify with the
+		 * old map to resync that state back to it. The update never
+		 * became visible either way.
+		 */
+		WRITE_ONCE(cg_link->map, old_map);
+		replace_effective_prog(cgrp, atype, pl);
+		if (cgroup_struct_ops_notify_attach(old_map, cgrp, atype))
+			pr_warn("cgroup struct_ops: failed to restore state after aborted update\n");
+		bpf_map_put(new_map);
+		goto out;
+	}
+
+	cgroup_struct_ops_notify_detach(old_map, cgrp, atype);
 	bpf_map_put(old_map);
 	cgrp->bpf.revisions[atype]++;
 
@@ -3135,6 +3180,18 @@ int cgroup_bpf_struct_ops_attach(struct bpf_map *map, const union bpf_attr *attr
 
 	err = update_effective_progs(cgrp, atype);
 	if (err) {
+		hlist_del(&pl->node);
+		goto unlock;
+	}
+
+	err = cgroup_struct_ops_notify_attach(map, cgrp, atype);
+	if (err) {
+		/* Unpublish again; mirrors __cgroup_struct_ops_link_detach(). */
+		pl->link = NULL;
+		if (update_effective_progs(cgrp, atype)) {
+			pl->link = link;
+			purge_effective_progs(cgrp, pl, atype);
+		}
 		hlist_del(&pl->node);
 		goto unlock;
 	}

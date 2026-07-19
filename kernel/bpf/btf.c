@@ -9885,8 +9885,13 @@ btf_add_struct_ops(struct btf *btf, struct bpf_struct_ops *st_ops,
 		 */
 		cgroup_bpf_struct_ops_register(cgroup_atype,
 					       tab->ops[btf->struct_ops_tab->cnt].type_id,
-					       st_ops->cfi_stubs,
-					       st_ops->free_after_mult_rcu_gp);
+					       st_ops);
+	} else if (st_ops->cg_attach || st_ops->cg_detach) {
+		/* The attach/detach notifiers are only invoked for cgroup
+		 * attachment; they are meaningless without a cgroup_atype.
+		 */
+		bpf_struct_ops_desc_release(&tab->ops[btf->struct_ops_tab->cnt]);
+		return -EINVAL;
 	}
 
 	btf->struct_ops_tab->cnt++;
