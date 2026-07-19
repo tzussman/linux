@@ -316,6 +316,147 @@ __bpf_kfunc int bpf_cache_ext_list_del(struct folio *folio)
 	return ret;
 }
 
+/*
+ * Open-coded policy list iterator, for use with bpf_for_each(). The
+ * BPF-visible iterator is opaque; the kernel-side state is a pointer to
+ * the list plus the current folio.
+ *
+ * The iterator advances through a cursor threaded into the list, so it
+ * tolerates concurrent removal (eviction, truncation) of any folio,
+ * including the current one. _next() returns each folio with a reference
+ * held until the following _next()/_destroy() call, which is what makes
+ * the returned pointer trusted for the body of the loop.
+ *
+ * Iteration never runs under the domain lock across the loop body: the
+ * lock is taken per step, so the body may call any list kfunc, including
+ * ones that take folios off this very list. This replaces the prototype's
+ * callback-style iterate/sample kfuncs, which invoked BPF while holding
+ * the registry rwlock (a self-deadlock if the callback used a list kfunc)
+ * and required bespoke verifier support.
+ */
+struct bpf_iter_cache_ext_list_kern {
+	struct cache_ext_domain *domain;
+	struct cache_ext_list *list;
+	struct folio *folio;
+} __aligned(8);
+
+struct bpf_iter_cache_ext_list {
+	u64 __opaque[3];
+} __aligned(8);
+
+/**
+ * bpf_iter_cache_ext_list_new - create a policy list iterator.
+ * @it: iterator to initialize.
+ * @memcg: memcg whose domain the list belongs to.
+ * @list: list handle to iterate.
+ *
+ * At most one iterator can be active per list; a second one fails with
+ * -EBUSY (and its _next() then yields nothing).
+ *
+ * Return: 0 on success, -errno on failure.
+ */
+__bpf_kfunc int bpf_iter_cache_ext_list_new(struct bpf_iter_cache_ext_list *it,
+					    struct mem_cgroup *memcg, u64 list)
+{
+	struct bpf_iter_cache_ext_list_kern *kit = (void *)it;
+	struct cache_ext_domain *domain;
+	struct cache_ext_list *l;
+	unsigned long flags;
+	int ret = -ENOENT;
+
+	BUILD_BUG_ON(sizeof(struct bpf_iter_cache_ext_list_kern) >
+		     sizeof(struct bpf_iter_cache_ext_list));
+	BUILD_BUG_ON(__alignof__(struct bpf_iter_cache_ext_list_kern) !=
+		     __alignof__(struct bpf_iter_cache_ext_list));
+
+	/* _next() and _destroy() run regardless of our return value. */
+	kit->list = NULL;
+	kit->folio = NULL;
+
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(memcg);
+	if (!domain)
+		goto out;
+
+	spin_lock_irqsave(&domain->lock, flags);
+	if (list >= CACHE_EXT_MAX_LISTS || !domain->lists[list].in_use) {
+		spin_unlock_irqrestore(&domain->lock, flags);
+		goto out;
+	}
+	l = &domain->lists[list];
+	if (l->iter_active) {
+		ret = -EBUSY;
+		spin_unlock_irqrestore(&domain->lock, flags);
+		goto out;
+	}
+	l->iter_active = true;
+	list_add(&l->cursor, &l->head);
+	kit->domain = domain;
+	kit->list = l;
+	ret = 0;
+	spin_unlock_irqrestore(&domain->lock, flags);
+out:
+	rcu_read_unlock();
+	return ret;
+}
+
+/**
+ * bpf_iter_cache_ext_list_next - progress a policy list iterator.
+ * @it: iterator to progress.
+ *
+ * Return: the next folio, with a reference held until the next call, or
+ * NULL when the end of the list is reached.
+ */
+__bpf_kfunc struct folio *
+bpf_iter_cache_ext_list_next(struct bpf_iter_cache_ext_list *it)
+{
+	struct bpf_iter_cache_ext_list_kern *kit = (void *)it;
+	struct folio *prev = kit->folio, *folio = NULL;
+	struct cache_ext_list *l = kit->list;
+	unsigned long flags;
+
+	if (!l)
+		return NULL;
+
+	spin_lock_irqsave(&kit->domain->lock, flags);
+	if (l->cursor.next != &l->head) {
+		folio = list_entry(l->cursor.next, struct folio, lru);
+		/* Owned folios always have at least the list's reference. */
+		folio_get(folio);
+		list_move(&l->cursor, &folio->lru);
+	}
+	kit->folio = folio;
+	spin_unlock_irqrestore(&kit->domain->lock, flags);
+
+	if (prev)
+		folio_put(prev);
+	return folio;
+}
+
+/**
+ * bpf_iter_cache_ext_list_destroy - destroy a policy list iterator.
+ * @it: iterator to destroy.
+ */
+__bpf_kfunc void bpf_iter_cache_ext_list_destroy(struct bpf_iter_cache_ext_list *it)
+{
+	struct bpf_iter_cache_ext_list_kern *kit = (void *)it;
+	struct cache_ext_list *l = kit->list;
+	unsigned long flags;
+
+	if (!l)
+		return;
+
+	spin_lock_irqsave(&kit->domain->lock, flags);
+	list_del_init(&l->cursor);
+	l->iter_active = false;
+	spin_unlock_irqrestore(&kit->domain->lock, flags);
+
+	if (kit->folio)
+		folio_put(kit->folio);
+	kit->list = NULL;
+	kit->folio = NULL;
+}
+
 __bpf_kfunc_end_defs();
 
 BTF_KFUNCS_START(cache_ext_kfuncs)
@@ -324,6 +465,9 @@ BTF_ID_FLAGS(func, bpf_cache_ext_list_add)
 BTF_ID_FLAGS(func, bpf_cache_ext_list_add_tail)
 BTF_ID_FLAGS(func, bpf_cache_ext_list_move)
 BTF_ID_FLAGS(func, bpf_cache_ext_list_del)
+BTF_ID_FLAGS(func, bpf_iter_cache_ext_list_new, KF_ITER_NEW)
+BTF_ID_FLAGS(func, bpf_iter_cache_ext_list_next, KF_ITER_NEXT | KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_iter_cache_ext_list_destroy, KF_ITER_DESTROY)
 BTF_KFUNCS_END(cache_ext_kfuncs)
 
 static struct bpf_struct_ops bpf_cache_ext_ops;

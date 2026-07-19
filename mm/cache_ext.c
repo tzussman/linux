@@ -64,8 +64,10 @@ struct cache_ext_domain *cache_ext_domain_alloc(struct mem_cgroup *memcg)
 	mutex_init(&domain->evict_mutex);
 	domain->state = CACHE_EXT_ATTACHED;
 	domain->memcg = memcg;
-	for (i = 0; i < CACHE_EXT_MAX_LISTS; i++)
+	for (i = 0; i < CACHE_EXT_MAX_LISTS; i++) {
 		INIT_LIST_HEAD(&domain->lists[i].head);
+		INIT_LIST_HEAD(&domain->lists[i].cursor);
+	}
 
 	return domain;
 }
@@ -280,11 +282,19 @@ void cache_ext_domain_drain(struct cache_ext_domain *domain)
 		nr = 0;
 		spin_lock_irqsave(&domain->lock, flags);
 		for (i = 0; i < domain->nr_lists && nr < CACHE_EXT_DRAIN_BATCH; i++) {
-			struct list_head *head = &domain->lists[i].head;
+			struct cache_ext_list *list = &domain->lists[i];
+			struct list_head *head = &list->head;
 
 			while (nr < CACHE_EXT_DRAIN_BATCH && !list_empty(head)) {
-				struct folio *folio = list_first_entry(head,
-							struct folio, lru);
+				struct folio *folio;
+
+				if (unlikely(head->next == &list->cursor)) {
+					/* Leaked iterator cursor; unlink it. */
+					VM_WARN_ON_ONCE(1);
+					list_del_init(&list->cursor);
+					continue;
+				}
+				folio = list_first_entry(head, struct folio, lru);
 
 				if (!folio_test_clear_cache_ext(folio)) {
 					/*

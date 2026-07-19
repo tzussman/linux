@@ -32,6 +32,15 @@ struct mem_cgroup;
 
 struct cache_ext_list {
 	struct list_head head;
+	/*
+	 * Cursor of the (single) active iterator, threaded into ->head
+	 * among the folios while ->iter_active. Entries on a policy list
+	 * are folios linked via folio->lru, which leaves no way to tag an
+	 * in-list cursor as "not a folio" — so there is exactly one cursor
+	 * per list, at a known address, and at most one iterator at a time.
+	 */
+	struct list_head cursor;
+	bool iter_active;
 	bool in_use;
 };
 
