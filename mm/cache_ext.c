@@ -79,22 +79,27 @@ void cache_ext_domain_free(struct cache_ext_domain *domain)
 }
 
 /*
- * Hand out a new policy list. Only called from the policy's init()
- * callback, which runs single-threaded per domain before the domain is
- * published, so no locking is needed against other list creation.
+ * Hand out a new policy list. Meant to be called from the policy's init()
+ * callback; the lock is held because the domain is already published at
+ * that point and the hot paths read lists[].in_use under it.
  */
 int cache_ext_list_create(struct cache_ext_domain *domain)
 {
+	unsigned long flags;
 	unsigned int i;
+	int ret = -ENOSPC;
 
+	spin_lock_irqsave(&domain->lock, flags);
 	for (i = 0; i < CACHE_EXT_MAX_LISTS; i++) {
 		if (!domain->lists[i].in_use) {
 			domain->lists[i].in_use = true;
 			domain->nr_lists++;
-			return i;
+			ret = i;
+			break;
 		}
 	}
-	return -ENOSPC;
+	spin_unlock_irqrestore(&domain->lock, flags);
+	return ret;
 }
 
 static struct cache_ext_list *cache_ext_get_list(struct cache_ext_domain *domain,

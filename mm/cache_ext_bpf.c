@@ -20,10 +20,12 @@
 #include <linux/bpf_verifier.h>
 #include <linux/btf.h>
 #include <linux/cache_ext.h>
+#include <linux/btf_ids.h>
 #include <linux/cgroup.h>
 #include <linux/memcontrol.h>
 
 #include "cache_ext.h"
+#include "internal.h"
 
 static struct mem_cgroup *cache_ext_cgroup_memcg(struct cgroup *cgrp)
 {
@@ -200,6 +202,155 @@ int cache_ext_memcg_online(struct mem_cgroup *memcg)
 	return 0;
 }
 
+/*
+ * Kfuncs exposed to policies. Kfunc arguments are trusted by default, so
+ * every folio argument is one the kernel handed to the policy: either a
+ * callback argument (pinned for the duration of the call by the hook that
+ * invoked the policy) or an iterator element. There is nothing to
+ * revalidate.
+ */
+
+__bpf_kfunc_start_defs();
+
+/**
+ * bpf_cache_ext_list_create - allocate a policy list.
+ * @memcg: memcg whose domain the list belongs to.
+ *
+ * Only callable from a policy's init() (it is the only sleepable member).
+ *
+ * Return: a list handle (>= 0) on success, -errno on failure.
+ */
+__bpf_kfunc s32 bpf_cache_ext_list_create(struct mem_cgroup *memcg)
+{
+	struct cache_ext_domain *domain;
+	s32 ret;
+
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(memcg);
+	ret = domain ? cache_ext_list_create(domain) : -ENOENT;
+	rcu_read_unlock();
+	return ret;
+}
+
+static int cache_ext_folio_list_op(struct folio *folio, u64 list, bool tail,
+				   bool move)
+{
+	struct cache_ext_domain *domain;
+	bool ok = false;
+
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
+	if (domain) {
+		if (move)
+			ok = cache_ext_move_folio(domain, list, folio, tail);
+		else
+			ok = cache_ext_place_folio(domain, list, folio, tail);
+	}
+	rcu_read_unlock();
+	return ok ? 0 : -EINVAL;
+}
+
+/**
+ * bpf_cache_ext_list_add - take ownership of a folio at the head of a list.
+ * @folio: folio to place.
+ * @list: destination list handle.
+ *
+ * Fails if the folio is already owned, on an LRU, unevictable, or no
+ * longer in the page cache.
+ *
+ * Return: 0 on success, -errno on failure.
+ */
+__bpf_kfunc int bpf_cache_ext_list_add(struct folio *folio, u64 list)
+{
+	return cache_ext_folio_list_op(folio, list, false, false);
+}
+
+/**
+ * bpf_cache_ext_list_add_tail - like bpf_cache_ext_list_add(), at the tail.
+ * @folio: folio to place.
+ * @list: destination list handle.
+ *
+ * Return: 0 on success, -errno on failure.
+ */
+__bpf_kfunc int bpf_cache_ext_list_add_tail(struct folio *folio, u64 list)
+{
+	return cache_ext_folio_list_op(folio, list, true, false);
+}
+
+/**
+ * bpf_cache_ext_list_move - move an owned folio to another list position.
+ * @folio: folio to move.
+ * @list: destination list handle.
+ * @tail: move to the tail instead of the head.
+ *
+ * Return: 0 on success, -errno if the folio is not currently owned.
+ */
+__bpf_kfunc int bpf_cache_ext_list_move(struct folio *folio, u64 list,
+					bool tail)
+{
+	return cache_ext_folio_list_op(folio, list, tail, true);
+}
+
+/**
+ * bpf_cache_ext_list_del - stop tracking a folio.
+ * @folio: folio to release.
+ *
+ * The policy gives the folio up; it is claimed back and returned to the
+ * kernel LRU, since every pagecache folio must live on exactly one list.
+ *
+ * Return: 0 on success, -errno if the folio is not currently owned.
+ */
+__bpf_kfunc int bpf_cache_ext_list_del(struct folio *folio)
+{
+	struct cache_ext_domain *domain;
+	int ret = -EINVAL;
+
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
+	if (domain && cache_ext_claim_folio(domain, folio)) {
+		/* Consumes the reference inherited from the list. */
+		folio_putback_lru(folio);
+		ret = 0;
+	}
+	rcu_read_unlock();
+	return ret;
+}
+
+__bpf_kfunc_end_defs();
+
+BTF_KFUNCS_START(cache_ext_kfuncs)
+BTF_ID_FLAGS(func, bpf_cache_ext_list_create, KF_SLEEPABLE)
+BTF_ID_FLAGS(func, bpf_cache_ext_list_add)
+BTF_ID_FLAGS(func, bpf_cache_ext_list_add_tail)
+BTF_ID_FLAGS(func, bpf_cache_ext_list_move)
+BTF_ID_FLAGS(func, bpf_cache_ext_list_del)
+BTF_KFUNCS_END(cache_ext_kfuncs)
+
+static struct bpf_struct_ops bpf_cache_ext_ops;
+
+/*
+ * The list kfuncs mutate exclusive per-folio ownership state; nothing
+ * outside a cache_ext policy has any business calling them. See
+ * scx_kfunc_filter() for the st_ops == NULL early-pass caveat.
+ */
+static int bpf_cache_ext_kfunc_filter(const struct bpf_prog *prog,
+				      u32 kfunc_id)
+{
+	if (!btf_id_set8_contains(&cache_ext_kfuncs, kfunc_id))
+		return 0;
+	if (prog->type != BPF_PROG_TYPE_STRUCT_OPS)
+		return -EACCES;
+	if (!prog->aux->st_ops)
+		return 0;
+	return prog->aux->st_ops == &bpf_cache_ext_ops ? 0 : -EACCES;
+}
+
+static const struct btf_kfunc_id_set cache_ext_kfunc_set = {
+	.owner	= THIS_MODULE,
+	.set	= &cache_ext_kfuncs,
+	.filter	= bpf_cache_ext_kfunc_filter,
+};
+
 /* struct_ops boilerplate below. */
 
 static s32 cache_ext_init_stub(struct mem_cgroup *memcg)
@@ -302,6 +453,13 @@ static struct bpf_struct_ops bpf_cache_ext_ops = {
 
 static int __init bpf_cache_ext_ops_init(void)
 {
+	int err;
+
+	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_STRUCT_OPS,
+					&cache_ext_kfunc_set);
+	if (err)
+		return err;
+
 	return register_bpf_struct_ops(&bpf_cache_ext_ops, cache_ext_ops);
 }
 late_initcall(bpf_cache_ext_ops_init);
