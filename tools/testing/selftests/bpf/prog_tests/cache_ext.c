@@ -15,6 +15,7 @@
 #include <test_progs.h>
 #include "cgroup_helpers.h"
 #include "cache_ext_fifo.skel.h"
+#include "cache_ext_hostile.skel.h"
 #include "cache_ext_s3fifo.skel.h"
 #include "cache_ext_sleepable_fail.skel.h"
 
@@ -500,6 +501,65 @@ out:
 	}
 }
 
+/*
+ * A policy that abuses every kfunc. The kernel must refuse each abuse
+ * (proven by the policy's own counters) and survive intact.
+ */
+static void subtest_hostile(void)
+{
+	struct cache_ext_hostile *skel = NULL;
+	struct bpf_link *link = NULL;
+	int cgroup_fd = -1, churn_fd = -1;
+
+	if (setup_memcg_cgroup(CG_A, &cgroup_fd))
+		return;
+	if (!ASSERT_OK(join_cgroup(CG_A), "join cgroup"))
+		goto out;
+
+	skel = cache_ext_hostile__open_and_load();
+	if (!ASSERT_OK_PTR(skel, "open_and_load"))
+		goto out;
+
+	link = bpf_map__attach_cgroup_opts(skel->maps.hostile_ops, cgroup_fd,
+					   NULL);
+	if (!ASSERT_OK_PTR(link, "attach hostile_ops"))
+		goto out;
+
+	if (__churn_pagecache(2, &churn_fd))
+		goto out;
+
+	ASSERT_EQ(skel->bss->nr_lists_created, 8, "list table filled");
+	ASSERT_GT(skel->bss->nr_create_blocked, 0, "9th list refused");
+	ASSERT_GT(skel->bss->nr_added, 0, "well-behaved adoption worked");
+	ASSERT_GT(skel->bss->nr_readd_blocked, 0,
+		  "re-adoption after list_del refused");
+	ASSERT_GT(skel->bss->nr_bogus_add_blocked, 0, "bogus add refused");
+	ASSERT_GT(skel->bss->nr_bogus_move_blocked, 0, "bogus move refused");
+	ASSERT_GT(skel->bss->nr_ctx_add_blocked, 0,
+		  "adoption from folio_accessed refused");
+	ASSERT_GT(skel->bss->nr_evicted, 0, "eviction still works");
+	ASSERT_GT(skel->bss->nr_stale_evict_blocked, 0,
+		  "evicting a given-up folio refused");
+	ASSERT_GT(skel->bss->nr_iter_busy, 0, "nested iterator refused");
+
+	close(churn_fd);
+	churn_fd = -1;
+	bpf_link__destroy(link);
+	link = NULL;
+	ASSERT_TRUE(stat_drains_to_zero(), "drained after hostile policy");
+out:
+	if (churn_fd >= 0)
+		close(churn_fd);
+	join_root_cgroup();
+	if (link)
+		bpf_link__destroy(link);
+	cache_ext_hostile__destroy(skel);
+	if (cgroup_fd >= 0) {
+		close(cgroup_fd);
+		remove_cgroup(CG_A);
+	}
+}
+
 /* Only init() may be sleepable; a sleepable folio_added must not load. */
 static void subtest_sleepable_reject(void)
 {
@@ -530,6 +590,8 @@ void test_cache_ext(void)
 		subtest_init_failure();
 	if (test__start_subtest("attach_no_memcg"))
 		subtest_attach_no_memcg();
+	if (test__start_subtest("hostile"))
+		subtest_hostile();
 	if (test__start_subtest("sleepable_reject"))
 		subtest_sleepable_reject();
 
