@@ -51,6 +51,7 @@
 #include <linux/pgalloc.h>
 
 #include <asm/tlbflush.h>
+#include "cache_ext.h"
 #include "internal.h"
 
 #define CREATE_TRACE_POINTS
@@ -225,6 +226,8 @@ void __filemap_remove_folio(struct folio *folio, void *shadow)
 	trace_mm_filemap_delete_from_page_cache(folio);
 	filemap_unaccount_folio(mapping, folio);
 	page_cache_delete(mapping, folio, shadow);
+	/* After page_cache_delete(): placement re-checks ->mapping. */
+	cache_ext_folio_removed(folio);
 }
 
 static void filemap_free_folio(const struct address_space *mapping,
@@ -338,6 +341,9 @@ void delete_from_page_cache_batch(struct address_space *mapping,
 	if (mapping_shrinkable(mapping))
 		inode_lru_list_add(mapping->host);
 	spin_unlock(&mapping->host->i_lock);
+
+	for (i = 0; i < folio_batch_count(fbatch); i++)
+		cache_ext_folio_removed(fbatch->folios[i]);
 
 	for (i = 0; i < folio_batch_count(fbatch); i++)
 		filemap_free_folio(mapping, fbatch->folios[i]);
@@ -839,6 +845,7 @@ void replace_page_cache_folio(struct folio *old, struct folio *new)
 	if (folio_test_swapbacked(new))
 		lruvec_stat_add_folio(new, NR_SHMEM);
 	xas_unlock_irq(&xas);
+	cache_ext_folio_removed(old);
 	if (free_folio)
 		free_folio(old);
 	folio_put(old);
@@ -979,7 +986,7 @@ int filemap_add_folio(struct address_space *mapping, struct folio *folio,
 		WARN_ON_ONCE(folio_test_active(folio));
 		if (!(gfp & __GFP_WRITE) && shadow)
 			workingset_refault(folio, shadow);
-		folio_add_lru(folio);
+		cache_ext_folio_add_lru(folio);
 		if (kernel_file)
 			mod_node_page_state(folio_pgdat(folio),
 					    NR_KERNEL_FILE_PAGES,

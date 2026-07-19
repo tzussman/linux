@@ -321,6 +321,103 @@ void cache_ext_domain_drain(struct cache_ext_domain *domain)
 	} while (nr);
 }
 
+void __cache_ext_folio_add_lru(struct folio *folio)
+{
+	struct cache_ext_domain *domain;
+	struct cache_ext_ops *ops;
+
+	/*
+	 * Only regular file pagecache arrives here: anon, shmem, and
+	 * hugetlb folios take other paths onto their lists. Kernel-internal
+	 * files are excluded from policy control.
+	 */
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
+	if (!domain || READ_ONCE(domain->state) != CACHE_EXT_ATTACHED)
+		goto fallback;
+	if (folio->mapping && test_bit(AS_KERNEL_FILE, &folio->mapping->flags))
+		goto fallback;
+
+	ops = domain->ops;
+	if (ops->admit_folio && !ops->admit_folio(folio)) {
+		folio_set_dropbehind(folio);
+		goto fallback;
+	}
+	if (ops->folio_added) {
+		/*
+		 * Mark the adoption window on this CPU; cache_ext_place_folio()
+		 * only takes a folio here. preempt_disable() keeps the flag
+		 * matched to the CPU running the (non-sleepable) callback.
+		 */
+		preempt_disable();
+		this_cpu_write(cache_ext_in_folio_added, true);
+		ops->folio_added(folio);
+		this_cpu_write(cache_ext_in_folio_added, false);
+		preempt_enable();
+	}
+	/*
+	 * If the policy took ownership (bpf_cache_ext_list_add() succeeded),
+	 * the folio must not also go onto the kernel LRU.
+	 */
+	if (folio_test_cache_ext(folio)) {
+		rcu_read_unlock();
+		return;
+	}
+fallback:
+	rcu_read_unlock();
+	folio_add_lru(folio);
+}
+
+void __cache_ext_folio_removed(struct folio *folio)
+{
+	struct cache_ext_domain *domain;
+
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
+	/*
+	 * No published domain (teardown in flight) means the drain worker
+	 * owns claiming this folio back; it will find ->mapping cleared and
+	 * the folio will fall off the LRU on its final put.
+	 */
+	if (domain && cache_ext_claim_folio(domain, folio)) {
+		if (domain->ops->folio_evicted)
+			domain->ops->folio_evicted(folio);
+		folio_put(folio);
+	}
+	rcu_read_unlock();
+}
+
+bool __cache_ext_folio_accessed(struct folio *folio)
+{
+	struct cache_ext_domain *domain;
+
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
+	if (domain && domain->ops->folio_accessed)
+		domain->ops->folio_accessed(folio);
+	rcu_read_unlock();
+	/*
+	 * The folio was policy-owned a moment ago; whether or not it still
+	 * is, it has no kernel LRU state to age.
+	 */
+	return true;
+}
+
+void __cache_ext_folio_release(struct folio *folio)
+{
+	struct cache_ext_domain *domain;
+
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
+	if (domain && cache_ext_claim_folio(domain, folio)) {
+		if (domain->ops->folio_evicted)
+			domain->ops->folio_evicted(folio);
+		/* Consumes the list's reference. */
+		folio_putback_lru(folio);
+	}
+	rcu_read_unlock();
+}
+
 /**
  * cache_ext_domain_publish - make a domain govern a memcg.
  * @memcg: the memcg.

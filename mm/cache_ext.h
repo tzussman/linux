@@ -15,6 +15,7 @@
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
 #include <linux/spinlock.h>
+#include <linux/swap.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
@@ -22,6 +23,8 @@ struct bpf_map;
 struct cache_ext_ops;
 struct folio;
 struct mem_cgroup;
+
+#ifdef CONFIG_CACHE_EXT
 
 /*
  * A policy allocates its lists from a small fixed array during init().
@@ -109,5 +112,86 @@ bool cache_ext_move_folio(struct cache_ext_domain *domain, u64 handle,
 bool cache_ext_claim_folio(struct cache_ext_domain *domain,
 			   struct folio *folio);
 void cache_ext_domain_drain(struct cache_ext_domain *domain);
+
+void __cache_ext_folio_add_lru(struct folio *folio);
+void __cache_ext_folio_removed(struct folio *folio);
+bool __cache_ext_folio_accessed(struct folio *folio);
+void __cache_ext_folio_release(struct folio *folio);
+
+/*
+ * Insertion hook; replaces folio_add_lru() on the page cache insertion
+ * path. Runs admission and gives the governing policy (if any) the chance
+ * to take ownership; folios the policy does not take go to the kernel LRU
+ * as usual.
+ */
+static inline void cache_ext_folio_add_lru(struct folio *folio)
+{
+	if (static_branch_unlikely(&cache_ext_enabled_key)) {
+		__cache_ext_folio_add_lru(folio);
+		return;
+	}
+	folio_add_lru(folio);
+}
+
+/*
+ * Removal hook; called after the folio has been deleted from the page
+ * cache xarray (i.e. after folio->mapping has been cleared — placement
+ * re-checks ->mapping under the domain lock, which is what makes this
+ * pairing race-free). Claims the folio back from its policy list, if it
+ * is on one, and drops the list's reference. That put is never final:
+ * every remover holds the folio locked with its own reference.
+ */
+static inline void cache_ext_folio_removed(struct folio *folio)
+{
+	if (static_branch_unlikely(&cache_ext_enabled_key) &&
+	    folio_test_cache_ext(folio))
+		__cache_ext_folio_removed(folio);
+}
+
+/*
+ * Access hook; returns true if the folio is policy-owned and the access
+ * has been handed to the policy, in which case the caller must skip the
+ * kernel LRU aging.
+ */
+static inline bool cache_ext_folio_accessed(struct folio *folio)
+{
+	if (static_branch_unlikely(&cache_ext_enabled_key) &&
+	    folio_test_cache_ext(folio))
+		return __cache_ext_folio_accessed(folio);
+	return false;
+}
+
+/*
+ * Give an owned folio back to the kernel LRU, e.g. because a kernel
+ * operation (THP split) needs the folio in its normal, unpinned state.
+ */
+static inline void cache_ext_folio_release(struct folio *folio)
+{
+	if (static_branch_unlikely(&cache_ext_enabled_key) &&
+	    folio_test_cache_ext(folio))
+		__cache_ext_folio_release(folio);
+}
+
+#else /* CONFIG_CACHE_EXT */
+
+static inline void cache_ext_folio_add_lru(struct folio *folio)
+{
+	folio_add_lru(folio);
+}
+
+static inline void cache_ext_folio_removed(struct folio *folio)
+{
+}
+
+static inline bool cache_ext_folio_accessed(struct folio *folio)
+{
+	return false;
+}
+
+static inline void cache_ext_folio_release(struct folio *folio)
+{
+}
+
+#endif /* CONFIG_CACHE_EXT */
 
 #endif /* _MM_CACHE_EXT_H */
