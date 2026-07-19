@@ -105,7 +105,9 @@ static int cache_ext_sync_memcg(struct mem_cgroup *memcg,
 	cache_ext_domain_publish(memcg, domain);
 
 	if (ops->init) {
+		domain->init_task = current;
 		err = ops->init(memcg);
+		domain->init_task = NULL;
 		if (err) {
 			cache_ext_domain_release(
 				cache_ext_domain_unpublish(memcg), false);
@@ -223,11 +225,18 @@ __bpf_kfunc_start_defs();
 __bpf_kfunc s32 bpf_cache_ext_list_create(struct mem_cgroup *memcg)
 {
 	struct cache_ext_domain *domain;
-	s32 ret;
+	s32 ret = -ENOENT;
 
 	rcu_read_lock();
 	domain = mem_cgroup_cache_ext_domain(memcg);
-	ret = domain ? cache_ext_list_create(domain) : -ENOENT;
+	/*
+	 * Lists may only be created from this domain's init() while it
+	 * runs; the sleepable-only kfunc flag alone would also admit a
+	 * future sleepable callback.
+	 */
+	if (domain)
+		ret = domain->init_task == current ?
+			cache_ext_list_create(domain) : -EPERM;
 	rcu_read_unlock();
 	return ret;
 }
@@ -308,8 +317,26 @@ __bpf_kfunc int bpf_cache_ext_list_del(struct folio *folio)
 	rcu_read_lock();
 	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
 	if (domain && cache_ext_claim_folio(domain, folio)) {
-		/* Consumes the reference inherited from the list. */
-		folio_putback_lru(folio);
+		if (this_cpu_read(cache_ext_adoptable_folio) == folio) {
+			/*
+			 * The policy adopted this folio and gave it back
+			 * within its own folio_added() callback, before it
+			 * ever reached an LRU. Close the one-shot adoption
+			 * window and drop the reference placement took; the
+			 * insertion path's fallback will add the folio to the
+			 * kernel LRU exactly once. Returning it here as well
+			 * would double-add it to the per-CPU LRU batch.
+			 */
+			this_cpu_write(cache_ext_adoptable_folio, NULL);
+			folio_put(folio);
+		} else {
+			/*
+			 * The folio was on an LRU before adoption; return it
+			 * there. Consumes the reference inherited from the
+			 * list.
+			 */
+			folio_putback_lru(folio);
+		}
 		ret = 0;
 	}
 	rcu_read_unlock();
@@ -339,6 +366,10 @@ __bpf_kfunc int bpf_cache_ext_evict(struct cache_ext_eviction_ctx *ctx,
 		container_of(ctx, struct cache_ext_eviction_ctx_kern, ctx);
 	struct cache_ext_domain *domain;
 	int ret = -EINVAL;
+
+	/* Only valid while the evict_folios() that received @ctx runs. */
+	if (this_cpu_read(cache_ext_kf_ctx) != CACHE_EXT_KF_EVICT)
+		return -EPERM;
 
 	if (kctx->ctx.nr_evicted >= kctx->ctx.request_nr_folios)
 		return -ENOSPC;
@@ -415,6 +446,12 @@ __bpf_kfunc int bpf_iter_cache_ext_list_new(struct bpf_iter_cache_ext_list *it,
 	domain = mem_cgroup_cache_ext_domain(memcg);
 	if (!domain)
 		goto out;
+
+	if (this_cpu_read(cache_ext_kf_ctx) != CACHE_EXT_KF_EVICT &&
+	    domain->init_task != current) {
+		ret = -EPERM;
+		goto out;
+	}
 
 	spin_lock_irqsave(&domain->lock, flags);
 	if (list >= CACHE_EXT_MAX_LISTS || !domain->lists[list].in_use) {

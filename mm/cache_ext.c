@@ -40,16 +40,28 @@
  */
 DEFINE_STATIC_KEY_FALSE(cache_ext_enabled_key);
 
+DEFINE_PER_CPU(enum cache_ext_kf_ctx, cache_ext_kf_ctx);
+DEFINE_PER_CPU(struct folio *, cache_ext_adoptable_folio);
+
 /*
- * Set on the local CPU only while a policy's folio_added() callback runs.
- * A folio may be taken onto a policy list exclusively from there, where it
- * is provably fresh: it has just entered the page cache and has not yet
- * reached folio_add_lru(), so it is on no LRU, in no per-CPU LRU batch, and
- * in no eviction batch. Adopting a folio in any other context could race a
- * concurrent claim and double-link folio->lru. Guarded by preempt_disable()
- * around the callback so the flag reliably describes the current CPU.
+ * Run a non-sleepable per-folio callback with the CPU-local context
+ * annotated for kfunc enforcement. Preemption is disabled so the context
+ * reliably describes the CPU the callback runs on; the callbacks are
+ * short and may not sleep anyway.
  */
-static DEFINE_PER_CPU(bool, cache_ext_in_folio_added);
+static void cache_ext_call_folio_op(void (*op)(struct folio *folio),
+				    enum cache_ext_kf_ctx ctx,
+				    struct folio *folio,
+				    struct folio *adoptable)
+{
+	preempt_disable();
+	this_cpu_write(cache_ext_kf_ctx, ctx);
+	this_cpu_write(cache_ext_adoptable_folio, adoptable);
+	op(folio);
+	this_cpu_write(cache_ext_adoptable_folio, NULL);
+	this_cpu_write(cache_ext_kf_ctx, CACHE_EXT_KF_NONE);
+	preempt_enable();
+}
 
 struct cache_ext_domain *cache_ext_domain_alloc(struct mem_cgroup *memcg)
 {
@@ -151,13 +163,14 @@ bool cache_ext_place_folio(struct cache_ext_domain *domain, u64 handle,
 		goto out;
 
 	/*
-	 * Only adopt a folio during its folio_added() callback, where it is
-	 * fresh. Outside that context a folio that momentarily has the
+	 * Only adopt the folio whose folio_added() callback is running on
+	 * this CPU, and only once: any other folio that momentarily has the
 	 * ownership bit clear may still be linked through folio->lru into an
 	 * LRU-add batch or an eviction batch, and adopting it would corrupt
-	 * that list.
+	 * that list. This includes this very folio after the policy gave it
+	 * back with bpf_cache_ext_list_del(), which clears the window.
 	 */
-	if (!this_cpu_read(cache_ext_in_folio_added))
+	if (this_cpu_read(cache_ext_adoptable_folio) != folio)
 		goto out;
 
 	if (folio_test_lru(folio) || folio_test_cache_ext(folio))
@@ -343,18 +356,9 @@ void __cache_ext_folio_add_lru(struct folio *folio)
 		folio_set_dropbehind(folio);
 		goto fallback;
 	}
-	if (ops->folio_added) {
-		/*
-		 * Mark the adoption window on this CPU; cache_ext_place_folio()
-		 * only takes a folio here. preempt_disable() keeps the flag
-		 * matched to the CPU running the (non-sleepable) callback.
-		 */
-		preempt_disable();
-		this_cpu_write(cache_ext_in_folio_added, true);
-		ops->folio_added(folio);
-		this_cpu_write(cache_ext_in_folio_added, false);
-		preempt_enable();
-	}
+	if (ops->folio_added)
+		cache_ext_call_folio_op(ops->folio_added, CACHE_EXT_KF_ADDED,
+					folio, folio);
 	/*
 	 * If the policy took ownership (bpf_cache_ext_list_add() succeeded),
 	 * the folio must not also go onto the kernel LRU.
@@ -381,7 +385,9 @@ void __cache_ext_folio_removed(struct folio *folio)
 	 */
 	if (domain && cache_ext_claim_folio(domain, folio)) {
 		if (domain->ops->folio_evicted)
-			domain->ops->folio_evicted(folio);
+			cache_ext_call_folio_op(domain->ops->folio_evicted,
+						CACHE_EXT_KF_EVICTED, folio,
+						NULL);
 		folio_put(folio);
 	}
 	rcu_read_unlock();
@@ -394,7 +400,8 @@ bool __cache_ext_folio_accessed(struct folio *folio)
 	rcu_read_lock();
 	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
 	if (domain && domain->ops->folio_accessed)
-		domain->ops->folio_accessed(folio);
+		cache_ext_call_folio_op(domain->ops->folio_accessed,
+					CACHE_EXT_KF_ACCESSED, folio, NULL);
 	rcu_read_unlock();
 	/*
 	 * The folio was policy-owned a moment ago; whether or not it still
@@ -411,7 +418,9 @@ void __cache_ext_folio_release(struct folio *folio)
 	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
 	if (domain && cache_ext_claim_folio(domain, folio)) {
 		if (domain->ops->folio_evicted)
-			domain->ops->folio_evicted(folio);
+			cache_ext_call_folio_op(domain->ops->folio_evicted,
+						CACHE_EXT_KF_EVICTED, folio,
+						NULL);
 		/* Consumes the list's reference. */
 		folio_putback_lru(folio);
 	}

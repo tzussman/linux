@@ -77,11 +77,45 @@ struct cache_ext_domain {
 	struct bpf_map *map;		/* reference held for ->ops' lifetime */
 	struct mem_cgroup *memcg;	/* css reference held until teardown */
 
+	/*
+	 * Task running this domain's sleepable init(), while it runs.
+	 * Init-only kfuncs (list creation) verify the caller against it;
+	 * a per-CPU context cannot describe a sleepable callback.
+	 */
+	struct task_struct *init_task;
+
 	struct work_struct teardown_work;
 	struct rcu_head rcu;
 };
 
 DECLARE_STATIC_KEY_FALSE(cache_ext_enabled_key);
+
+/*
+ * Which policy callback is running on this CPU, if any. Set (with
+ * preemption disabled) around every non-sleepable callback invocation and
+ * checked by kfuncs whose validity depends on the calling context — the
+ * same job sched_ext's kf_mask does. Sleepable callbacks (init) are
+ * identified through cache_ext_domain::init_task instead.
+ */
+enum cache_ext_kf_ctx {
+	CACHE_EXT_KF_NONE = 0,
+	CACHE_EXT_KF_ADDED,
+	CACHE_EXT_KF_ACCESSED,
+	CACHE_EXT_KF_EVICTED,
+	CACHE_EXT_KF_EVICT,
+};
+
+DECLARE_PER_CPU(enum cache_ext_kf_ctx, cache_ext_kf_ctx);
+
+/*
+ * The one folio that may be adopted in the current CACHE_EXT_KF_ADDED
+ * window. Placement compares against this rather than inferring "on no
+ * list" from folio state: a folio the policy just gave back sits in the
+ * per-CPU LRU-add batch with PG_lru still clear, and re-adopting it would
+ * double-link folio->lru. bpf_cache_ext_list_del() clears the window, so
+ * adoption is one-shot per insertion.
+ */
+DECLARE_PER_CPU(struct folio *, cache_ext_adoptable_folio);
 
 /*
  * Look up the policy domain governing @memcg, if any. The returned domain

@@ -5998,7 +5998,11 @@ static unsigned long cache_ext_reclaim(struct lruvec *lruvec,
 		u64 handed;
 
 		rcu_read_lock();
+		preempt_disable();
+		this_cpu_write(cache_ext_kf_ctx, CACHE_EXT_KF_EVICT);
 		domain->ops->evict_folios(&kctx.ctx, memcg);
+		this_cpu_write(cache_ext_kf_ctx, CACHE_EXT_KF_NONE);
+		preempt_enable();
 		rcu_read_unlock();
 
 		handed = kctx.ctx.nr_evicted;
