@@ -10,6 +10,8 @@
 struct folio;
 struct mem_cgroup;
 
+#define CACHE_EXT_OPS_NAME_LEN	64
+
 /**
  * struct cache_ext_eviction_ctx - one eviction request to a policy.
  * @request_nr_folios: number of folios the kernel wants handed over.
@@ -98,6 +100,12 @@ struct cache_ext_ops {
 	 * otherwise go stale across attachments.
 	 */
 	void (*exit)(struct mem_cgroup *memcg);
+
+	/**
+	 * @name: Policy name, reported in kernel messages concerning this
+	 * policy. Must be non-empty.
+	 */
+	char name[CACHE_EXT_OPS_NAME_LEN];
 };
 
 #ifdef CONFIG_CACHE_EXT

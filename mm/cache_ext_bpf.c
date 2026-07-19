@@ -136,6 +136,13 @@ static int cache_ext_sync_subtree(struct mem_cgroup *root,
 	return err;
 }
 
+static const char *cache_ext_ops_name(struct bpf_map *map)
+{
+	struct cache_ext_ops *ops = bpf_struct_ops_map_kdata(map);
+
+	return ops->name;
+}
+
 static int bpf_cache_ext_cg_attach(struct bpf_map *map, struct cgroup *cgrp)
 {
 	struct mem_cgroup *memcg;
@@ -154,7 +161,8 @@ static int bpf_cache_ext_cg_attach(struct bpf_map *map, struct cgroup *cgrp)
 		 * older state to restore beyond that.
 		 */
 		if (cache_ext_sync_subtree(memcg, cgrp))
-			pr_warn("cache_ext: unwind of failed attach left memcgs unmanaged\n");
+			pr_warn("cache_ext: %s: unwind of failed attach left memcgs unmanaged\n",
+				cache_ext_ops_name(map));
 	}
 	return err;
 }
@@ -173,7 +181,8 @@ static void bpf_cache_ext_cg_detach(struct bpf_map *map, struct cgroup *cgrp)
 	 * an ancestor's policy, or nothing).
 	 */
 	if (cache_ext_sync_subtree(memcg, NULL))
-		pr_warn("cache_ext: re-sync after detach left memcgs unmanaged\n");
+		pr_warn("cache_ext: %s: re-sync after detach left memcgs unmanaged\n",
+			cache_ext_ops_name(map));
 }
 
 /**
@@ -643,6 +652,16 @@ static int bpf_cache_ext_init_member(const struct btf_type *t,
 				     const struct btf_member *member,
 				     void *kdata, const void *udata)
 {
+	const struct cache_ext_ops *uops = udata;
+	struct cache_ext_ops *ops = kdata;
+	u32 moff = __btf_member_bit_offset(t, member) / 8;
+
+	if (moff == offsetof(struct cache_ext_ops, name)) {
+		if (bpf_obj_name_cpy(ops->name, uops->name,
+				     sizeof(ops->name)) <= 0)
+			return -EINVAL;
+		return 1;
+	}
 	return 0;
 }
 
