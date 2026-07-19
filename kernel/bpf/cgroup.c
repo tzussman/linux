@@ -38,6 +38,39 @@ void cgroup_bpf_struct_ops_register(int atype, u32 type_id,
 	struct_ops_by_atype[atype] = st_ops;
 }
 
+/**
+ * cgroup_bpf_struct_ops_first_map - first struct_ops map attached to a cgroup.
+ * @cgrp: the cgroup.
+ * @atype: a struct_ops cgroup attach type.
+ *
+ * Returns the map of the first (in attach order) struct_ops link attached
+ * to @cgrp itself for @atype, or NULL if there is none. Ancestors are not
+ * consulted. No reference is taken; the caller holds cgroup_mutex, which
+ * pins the attachment.
+ *
+ * This is for subsystems with exclusive-ownership semantics, where only
+ * one of the attached struct_ops can govern a cgroup at a time and the
+ * subsystem needs to resolve which one that is from its cg_attach() and
+ * cg_detach() callbacks.
+ */
+struct bpf_map *cgroup_bpf_struct_ops_first_map(struct cgroup *cgrp,
+						enum cgroup_bpf_attach_type atype)
+{
+	struct bpf_prog_list *pl;
+
+	lockdep_assert_held(&cgroup_mutex);
+
+	if (WARN_ON_ONCE(!cgroup_bpf_is_struct_ops_atype(atype)))
+		return NULL;
+
+	hlist_for_each_entry(pl, &cgrp->bpf.progs[atype], node) {
+		/* pl->link is NULL while a detach is unpublishing it. */
+		if (pl->link && pl->link->map)
+			return pl->link->map;
+	}
+	return NULL;
+}
+
 static int cgroup_struct_ops_notify_attach(struct bpf_map *map, struct cgroup *cgrp,
 					   enum cgroup_bpf_attach_type atype)
 {

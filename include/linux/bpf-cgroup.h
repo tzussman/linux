@@ -124,6 +124,8 @@ static inline bool cgroup_bpf_is_struct_ops_atype(enum cgroup_bpf_attach_type at
 void cgroup_bpf_struct_ops_register(int atype, u32 type_id,
 				    const struct bpf_struct_ops *st_ops);
 int cgroup_bpf_struct_ops_attach(struct bpf_map *map, const union bpf_attr *attr);
+struct bpf_map *cgroup_bpf_struct_ops_first_map(struct cgroup *cgrp,
+						enum cgroup_bpf_attach_type atype);
 
 void __init cgroup_bpf_lifetime_notifier_init(void);
 
@@ -501,6 +503,11 @@ static inline bool cgroup_bpf_is_struct_ops_atype(int atype)
 static inline void cgroup_bpf_struct_ops_register(int atype, u32 type_id,
 						  const struct bpf_struct_ops *st_ops)
 {
+}
+static inline struct bpf_map *
+cgroup_bpf_struct_ops_first_map(struct cgroup *cgrp, int atype)
+{
+	return NULL;
 }
 static inline int cgroup_bpf_struct_ops_attach(struct bpf_map *map,
 					       const union bpf_attr *attr)
