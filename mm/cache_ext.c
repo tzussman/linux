@@ -419,6 +419,75 @@ void __cache_ext_folio_release(struct folio *folio)
 }
 
 /**
+ * cache_ext_domain_force_release - take folios away from a starving policy.
+ * @domain: the domain.
+ * @nr: maximum number of folios to release.
+ *
+ * The anti-OOM fallback: claim up to @nr folios from the tails of the
+ * policy's lists and put them back on the kernel LRU, where normal
+ * reclaim can get at them. Used when reclaim is near OOM and the policy
+ * owns folios but hands none over — a policy can shape eviction, but it
+ * cannot pin memory.
+ *
+ * Returns the number of folios released.
+ */
+unsigned int cache_ext_domain_force_release(struct cache_ext_domain *domain,
+					    unsigned int nr)
+{
+	struct folio *batch[CACHE_EXT_DRAIN_BATCH];
+	unsigned int released = 0;
+	unsigned long flags;
+	unsigned int i, j, nr_batch;
+
+	while (released < nr) {
+		nr_batch = 0;
+		spin_lock_irqsave(&domain->lock, flags);
+		for (i = 0; i < domain->nr_lists &&
+			    nr_batch < CACHE_EXT_DRAIN_BATCH &&
+			    released + nr_batch < nr; i++) {
+			struct cache_ext_list *list = &domain->lists[i];
+			struct list_head *head = &list->head;
+
+			while (nr_batch < CACHE_EXT_DRAIN_BATCH &&
+			       released + nr_batch < nr && !list_empty(head)) {
+				struct folio *folio;
+
+				if (unlikely(head->prev == &list->cursor)) {
+					/* Only a live iterator's cursor left? */
+					if (head->next == &list->cursor)
+						break;
+					/*
+					 * Step over the cursor; the iterator
+					 * just restarts from the head.
+					 */
+					list_move(&list->cursor, head);
+					continue;
+				}
+				folio = list_last_entry(head, struct folio,
+							lru);
+				if (!folio_test_clear_cache_ext(folio)) {
+					VM_WARN_ON_ONCE_FOLIO(1, folio);
+					list_del_init(&folio->lru);
+					continue;
+				}
+				list_del_init(&folio->lru);
+				domain->nr_folios--;
+				cache_ext_stat_mod(folio, -1);
+				batch[nr_batch++] = folio;
+			}
+		}
+		spin_unlock_irqrestore(&domain->lock, flags);
+
+		if (!nr_batch)
+			break;
+		for (j = 0; j < nr_batch; j++)
+			folio_putback_lru(batch[j]);
+		released += nr_batch;
+	}
+	return released;
+}
+
+/**
  * cache_ext_domain_publish - make a domain govern a memcg.
  * @memcg: the memcg.
  * @domain: fully initialized domain; the policy's init() has already run.

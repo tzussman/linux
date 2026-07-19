@@ -6010,6 +6010,19 @@ static unsigned long cache_ext_reclaim(struct lruvec *lruvec,
 		if (handed < kctx.ctx.request_nr_folios)
 			break;
 	}
+
+	/*
+	 * Anti-OOM watchdog: reclaim is close to giving up, the policy owns
+	 * folios, and it handed over nothing that could be reclaimed. A
+	 * policy gets to shape eviction, not to pin memory: force a batch
+	 * off the list tails onto the kernel LRU, where the remainder of
+	 * this and the following (lower-priority) passes can get at it.
+	 */
+	if (!nr_reclaimed && sc->priority <= CACHE_EXT_OOM_PRIORITY &&
+	    READ_ONCE(domain->nr_folios))
+		cache_ext_domain_force_release(domain,
+					       CACHE_EXT_EVICTION_BATCH * 4);
+
 	mutex_unlock(&domain->evict_mutex);
 
 	sc->nr_reclaimed += nr_reclaimed;

@@ -113,9 +113,17 @@ bool cache_ext_move_folio(struct cache_ext_domain *domain, u64 handle,
 bool cache_ext_claim_folio(struct cache_ext_domain *domain,
 			   struct folio *folio);
 void cache_ext_domain_drain(struct cache_ext_domain *domain);
+unsigned int cache_ext_domain_force_release(struct cache_ext_domain *domain,
+					    unsigned int nr);
 
 /* Folios the kernel asks for per evict_folios() invocation, at most. */
 #define CACHE_EXT_EVICTION_BATCH	32
+
+/*
+ * Reclaim priority at or below which a policy that owns folios but
+ * reclaims none of them gets folios force-released to the kernel LRU.
+ */
+#define CACHE_EXT_OOM_PRIORITY		2
 
 /*
  * Kernel-side wrapper around the BPF-visible eviction context. Only the
