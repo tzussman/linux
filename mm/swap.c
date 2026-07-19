@@ -38,6 +38,7 @@
 #include <linux/local_lock.h>
 #include <linux/buffer_head.h>
 
+#include "cache_ext.h"
 #include "internal.h"
 
 #define CREATE_TRACE_POINTS
@@ -495,6 +496,12 @@ static bool lru_gen_clear_refs(struct folio *folio)
  */
 void folio_mark_accessed(struct folio *folio)
 {
+	/*
+	 * A policy-owned folio has no kernel LRU state to age, in either
+	 * LRU flavor; the access is the policy's to account.
+	 */
+	if (cache_ext_folio_accessed(folio))
+		return;
 	if (folio_test_dropbehind(folio))
 		return;
 	if (lru_gen_enabled()) {
