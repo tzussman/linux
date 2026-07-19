@@ -554,6 +554,15 @@ static void cache_ext_domain_teardown(struct cache_ext_domain *domain)
 
 	cache_ext_domain_drain(domain);
 
+	/*
+	 * Give the policy a chance to drop its own per-memcg bookkeeping.
+	 * The domain is unpublished and drained: every list is empty and no
+	 * folio-taking kfunc can succeed, so this is bookkeeping only. The
+	 * memcg and the ops are pinned by the references below.
+	 */
+	if (domain->ops && domain->ops->exit)
+		domain->ops->exit(domain->memcg);
+
 	if (domain->map)
 		bpf_map_put(domain->map);
 	css_put(&domain->memcg->css);

@@ -600,6 +600,10 @@ static bool cache_ext_admit_folio_stub(struct folio *folio)
 	return true;
 }
 
+static void cache_ext_exit_stub(struct mem_cgroup *memcg)
+{
+}
+
 static struct cache_ext_ops __bpf_cache_ext_ops = {
 	.init		= cache_ext_init_stub,
 	.evict_folios	= cache_ext_evict_folios_stub,
@@ -607,6 +611,7 @@ static struct cache_ext_ops __bpf_cache_ext_ops = {
 	.folio_accessed	= cache_ext_folio_accessed_stub,
 	.folio_evicted	= cache_ext_folio_evicted_stub,
 	.admit_folio	= cache_ext_admit_folio_stub,
+	.exit		= cache_ext_exit_stub,
 };
 
 static const struct bpf_func_proto *
@@ -648,11 +653,13 @@ static int bpf_cache_ext_check_member(const struct btf_type *t,
 	u32 moff = __btf_member_bit_offset(t, member) / 8;
 
 	/*
-	 * Everything except init() is called from atomic context under
-	 * RCU. init() runs from attachment, may sleep, and is the only
-	 * member allowed to call sleepable kfuncs.
+	 * Everything except init() and exit() is called from atomic
+	 * context under RCU; those two run from attachment and teardown
+	 * respectively and may sleep.
 	 */
-	if (prog->sleepable && moff != offsetof(struct cache_ext_ops, init))
+	if (prog->sleepable &&
+	    moff != offsetof(struct cache_ext_ops, init) &&
+	    moff != offsetof(struct cache_ext_ops, exit))
 		return -EINVAL;
 
 	return 0;

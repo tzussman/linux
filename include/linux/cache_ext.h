@@ -86,6 +86,18 @@ struct cache_ext_ops {
 	 * dropped on IO completion instead of polluting the cache.
 	 */
 	bool (*admit_folio)(struct folio *folio);
+
+	/**
+	 * @exit: Tear down policy state for one memcg.
+	 *
+	 * Pairs with @init: runs once per governed memcg after the domain
+	 * has been unpublished and drained (every list is empty, no folio
+	 * is owned), on detach, replacement, and memcg offlining. May be
+	 * sleepable. Bookkeeping only — no folio-taking kfunc can succeed
+	 * from here; use it to drop per-memcg map state that would
+	 * otherwise go stale across attachments.
+	 */
+	void (*exit)(struct mem_cgroup *memcg);
 };
 
 #ifdef CONFIG_CACHE_EXT
