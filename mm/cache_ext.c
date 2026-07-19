@@ -463,6 +463,17 @@ static void cache_ext_domain_teardown(struct cache_ext_domain *domain)
 	 * domain.
 	 */
 	synchronize_rcu();
+
+	/*
+	 * A reclaimer that found the domain before it was unpublished may
+	 * still hold evict_mutex while feeding claimed folios to
+	 * shrink_folio_list(), outside its RCU read section. After the
+	 * grace period above no new reclaimer can find the domain, so
+	 * taking the mutex once waits out the last holder.
+	 */
+	mutex_lock(&domain->evict_mutex);
+	mutex_unlock(&domain->evict_mutex);
+
 	cache_ext_domain_drain(domain);
 
 	if (domain->map)

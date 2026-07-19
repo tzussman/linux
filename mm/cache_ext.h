@@ -9,6 +9,7 @@
 #ifndef _MM_CACHE_EXT_H
 #define _MM_CACHE_EXT_H
 
+#include <linux/cache_ext.h>
 #include <linux/jump_label.h>
 #include <linux/list.h>
 #include <linux/memcontrol.h>
@@ -112,6 +113,24 @@ bool cache_ext_move_folio(struct cache_ext_domain *domain, u64 handle,
 bool cache_ext_claim_folio(struct cache_ext_domain *domain,
 			   struct folio *folio);
 void cache_ext_domain_drain(struct cache_ext_domain *domain);
+
+/* Folios the kernel asks for per evict_folios() invocation, at most. */
+#define CACHE_EXT_EVICTION_BATCH	32
+
+/*
+ * Kernel-side wrapper around the BPF-visible eviction context. Only the
+ * embedded ctx is exposed to the policy (read-only); the folios the
+ * policy hands over through bpf_cache_ext_evict() are claimed and
+ * collected here, with the list references inherited, so by the time
+ * evict_folios() returns every folio in ->folios is off all lists with
+ * the ownership bit clear and one reference held. There is no pointer a
+ * policy could forge and nothing to revalidate.
+ */
+struct cache_ext_eviction_ctx_kern {
+	struct cache_ext_eviction_ctx ctx;
+	struct cache_ext_domain *domain;
+	struct list_head folios;
+};
 
 void __cache_ext_folio_add_lru(struct folio *folio);
 void __cache_ext_folio_removed(struct folio *folio);

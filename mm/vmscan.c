@@ -65,6 +65,7 @@
 #include <linux/swapops.h>
 #include <linux/sched/sysctl.h>
 
+#include "cache_ext.h"
 #include "internal.h"
 #include "swap.h"
 
@@ -5873,6 +5874,155 @@ static void lru_gen_shrink_node(struct pglist_data *pgdat, struct scan_control *
 
 #endif /* CONFIG_LRU_GEN */
 
+#ifdef CONFIG_CACHE_EXT
+static unsigned int cache_ext_reclaim_node_folios(struct list_head *folio_list,
+						  struct pglist_data *pgdat,
+						  struct scan_control *sc,
+						  struct mem_cgroup *memcg)
+{
+	struct reclaim_stat stat;
+	unsigned int nr_reclaimed;
+	struct folio *folio;
+
+	if (list_empty(folio_list))
+		return 0;
+
+	nr_reclaimed = shrink_folio_list(folio_list, pgdat, sc, &stat, true,
+					 memcg);
+	while (!list_empty(folio_list)) {
+		folio = lru_to_folio(folio_list);
+		list_del(&folio->lru);
+		/*
+		 * Unreclaimable leftovers go to the kernel LRU, not back to
+		 * the policy: the policy already gave them up.
+		 */
+		folio_putback_lru(folio);
+	}
+	return nr_reclaimed;
+}
+
+/*
+ * Reclaim the folios a policy handed over: every folio on @folio_list is
+ * claimed (off all lists, ownership bit clear) with one inherited
+ * reference, which is exactly the state shrink_folio_list() expects of
+ * isolated folios. Policy lists are not per-node, so partition by node
+ * the same way reclaim_pages() does.
+ */
+static unsigned int cache_ext_reclaim_folios(struct list_head *folio_list,
+					     struct scan_control *sc,
+					     struct mem_cgroup *memcg)
+{
+	unsigned int nr_reclaimed = 0;
+	LIST_HEAD(node_folio_list);
+	int nid;
+
+	if (list_empty(folio_list))
+		return 0;
+
+	nid = folio_nid(lru_to_folio(folio_list));
+	do {
+		struct folio *folio = lru_to_folio(folio_list);
+
+		if (nid == folio_nid(folio)) {
+			folio_clear_active(folio);
+			list_move(&folio->lru, &node_folio_list);
+			continue;
+		}
+
+		nr_reclaimed += cache_ext_reclaim_node_folios(&node_folio_list,
+						NODE_DATA(nid), sc, memcg);
+		nid = folio_nid(lru_to_folio(folio_list));
+	} while (!list_empty(folio_list));
+
+	nr_reclaimed += cache_ext_reclaim_node_folios(&node_folio_list,
+						NODE_DATA(nid), sc, memcg);
+	return nr_reclaimed;
+}
+
+/*
+ * Ask the policy governing this lruvec's memcg to hand over folios and
+ * reclaim them. Runs above both LRU flavors: policy-owned folios live on
+ * neither the classic lists nor the MGLRU generations, so this is the
+ * only way they are ever reclaimed. Returns the number of reclaimed
+ * pages, which is also added to sc->nr_reclaimed.
+ */
+static unsigned long cache_ext_reclaim(struct lruvec *lruvec,
+				       struct scan_control *sc)
+{
+	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
+	struct cache_ext_domain *domain;
+	unsigned long nr_reclaimed = 0;
+	unsigned long total_handed = 0;
+
+	if (!static_branch_unlikely(&cache_ext_enabled_key))
+		return 0;
+
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(memcg);
+	if (!domain || READ_ONCE(domain->state) != CACHE_EXT_ATTACHED ||
+	    !domain->ops->evict_folios ||
+	    !mutex_trylock(&domain->evict_mutex)) {
+		/* Another reclaimer is already evicting for this domain. */
+		rcu_read_unlock();
+		return 0;
+	}
+	rcu_read_unlock();
+
+	/*
+	 * Holding evict_mutex outside the RCU section is what pins the
+	 * domain from here on: teardown acquires the mutex once after its
+	 * grace period, before draining and freeing.
+	 */
+	/*
+	 * Ask the policy to hand over up to sc->nr_to_reclaim folios and
+	 * reclaim whatever of them can be reclaimed right now. The bound is
+	 * on how many the policy *hands over*, not on how many are actually
+	 * reclaimed: a folio the policy chose as a victim may be transiently
+	 * unreclaimable (locked or under IO from a racing access), and it is
+	 * returned to the kernel LRU by cache_ext_reclaim_folios(). Bounding
+	 * on nr_reclaimed instead would make the kernel keep asking, marching
+	 * the policy's cursor past its chosen victims and into the working
+	 * set it is trying to retain. When the policy's victims cannot be
+	 * reclaimed, the kernel's own LRU scan below picks up the folios it
+	 * returned there, and lower-priority passes retry.
+	 */
+	while (total_handed < sc->nr_to_reclaim) {
+		struct cache_ext_eviction_ctx_kern kctx = {
+			.ctx.request_nr_folios =
+				min_t(u64, CACHE_EXT_EVICTION_BATCH,
+				      sc->nr_to_reclaim - total_handed),
+			.ctx.nid = lruvec_pgdat(lruvec)->node_id,
+			.domain = domain,
+			.folios = LIST_HEAD_INIT(kctx.folios),
+		};
+		u64 handed;
+
+		rcu_read_lock();
+		domain->ops->evict_folios(&kctx.ctx, memcg);
+		rcu_read_unlock();
+
+		handed = kctx.ctx.nr_evicted;
+		if (!handed)
+			break;
+		total_handed += handed;
+		nr_reclaimed += cache_ext_reclaim_folios(&kctx.folios, sc,
+							 memcg);
+		if (handed < kctx.ctx.request_nr_folios)
+			break;
+	}
+	mutex_unlock(&domain->evict_mutex);
+
+	sc->nr_reclaimed += nr_reclaimed;
+	return nr_reclaimed;
+}
+#else /* CONFIG_CACHE_EXT */
+static unsigned long cache_ext_reclaim(struct lruvec *lruvec,
+				       struct scan_control *sc)
+{
+	return 0;
+}
+#endif /* CONFIG_CACHE_EXT */
+
 static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 {
 	unsigned long nr[NR_LRU_LISTS];
@@ -5881,8 +6031,11 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	enum lru_list lru;
 	unsigned long nr_reclaimed = 0;
 	unsigned long nr_to_reclaim = sc->nr_to_reclaim;
+	unsigned long nr_cache_ext;
 	bool proportional_reclaim;
 	struct blk_plug plug;
+
+	nr_cache_ext = cache_ext_reclaim(lruvec, sc);
 
 	if ((lru_gen_enabled() || lru_gen_switching()) && !root_reclaim(sc)) {
 		lru_gen_shrink_lruvec(lruvec, sc);
@@ -5893,6 +6046,18 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	}
 
 	get_scan_count(lruvec, sc, nr);
+
+	/*
+	 * What the policy already reclaimed comes out of the file scan
+	 * targets; the policy replaces file aging for the folios it owns.
+	 */
+	if (nr_cache_ext) {
+		unsigned long sub = min(nr[LRU_INACTIVE_FILE], nr_cache_ext);
+
+		nr[LRU_INACTIVE_FILE] -= sub;
+		nr[LRU_ACTIVE_FILE] -= min(nr[LRU_ACTIVE_FILE],
+					   nr_cache_ext - sub);
+	}
 
 	/* Record the original scan target for proportional adjustments later */
 	memcpy(targets, nr, sizeof(nr));

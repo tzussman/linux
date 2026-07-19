@@ -316,6 +316,44 @@ __bpf_kfunc int bpf_cache_ext_list_del(struct folio *folio)
 	return ret;
 }
 
+/**
+ * bpf_cache_ext_evict - hand a folio over to the kernel for eviction.
+ * @ctx: the eviction context passed to evict_folios().
+ * @folio: folio to evict.
+ *
+ * Claims the folio off its policy list and appends it to the kernel-side
+ * eviction batch. Only callable while the evict_folios() invocation that
+ * received @ctx is running, and only for folios of the same domain.
+ *
+ * Handing a folio over is final from the policy's point of view: if the
+ * kernel then fails to reclaim it (dirty, under writeback, mlocked in the
+ * meantime), the folio goes to the kernel LRU, not back to the policy.
+ *
+ * Return: 0 on success, -ENOSPC when the batch is full, -EINVAL if the
+ * folio cannot be claimed.
+ */
+__bpf_kfunc int bpf_cache_ext_evict(struct cache_ext_eviction_ctx *ctx,
+				    struct folio *folio)
+{
+	struct cache_ext_eviction_ctx_kern *kctx =
+		container_of(ctx, struct cache_ext_eviction_ctx_kern, ctx);
+	struct cache_ext_domain *domain;
+	int ret = -EINVAL;
+
+	if (kctx->ctx.nr_evicted >= kctx->ctx.request_nr_folios)
+		return -ENOSPC;
+
+	rcu_read_lock();
+	domain = mem_cgroup_cache_ext_domain(folio_memcg(folio));
+	if (domain == kctx->domain && cache_ext_claim_folio(domain, folio)) {
+		list_add_tail(&folio->lru, &kctx->folios);
+		kctx->ctx.nr_evicted++;
+		ret = 0;
+	}
+	rcu_read_unlock();
+	return ret;
+}
+
 /*
  * Open-coded policy list iterator, for use with bpf_for_each(). The
  * BPF-visible iterator is opaque; the kernel-side state is a pointer to
@@ -465,6 +503,7 @@ BTF_ID_FLAGS(func, bpf_cache_ext_list_add)
 BTF_ID_FLAGS(func, bpf_cache_ext_list_add_tail)
 BTF_ID_FLAGS(func, bpf_cache_ext_list_move)
 BTF_ID_FLAGS(func, bpf_cache_ext_list_del)
+BTF_ID_FLAGS(func, bpf_cache_ext_evict)
 BTF_ID_FLAGS(func, bpf_iter_cache_ext_list_new, KF_ITER_NEW)
 BTF_ID_FLAGS(func, bpf_iter_cache_ext_list_next, KF_ITER_NEXT | KF_RET_NULL)
 BTF_ID_FLAGS(func, bpf_iter_cache_ext_list_destroy, KF_ITER_DESTROY)
