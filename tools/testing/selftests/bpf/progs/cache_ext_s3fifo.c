@@ -80,6 +80,7 @@ __u64 nr_promoted;
 __u64 nr_evicted_small;
 __u64 nr_evicted_main;
 __u64 nr_evict_requests;
+__u64 nr_exits;
 
 static struct folio_meta *folio_meta(struct folio *folio)
 {
@@ -302,6 +303,16 @@ void BPF_PROG(s3fifo_evict_folios, struct cache_ext_eviction_ctx *ectx,
 		evict_small(ectx, memcg);
 }
 
+SEC("struct_ops.s/exit")
+void BPF_PROG(s3fifo_exit, struct mem_cgroup *memcg)
+{
+	/*
+	 * The world for this memcg ended: without this, folio-keyed
+	 * metadata would go stale across attachments.
+	 */
+	__sync_fetch_and_add(&nr_exits, 1);
+}
+
 SEC(".struct_ops.link")
 struct cache_ext_ops s3fifo_ops = {
 	.init = (void *)s3fifo_init,
@@ -309,4 +320,6 @@ struct cache_ext_ops s3fifo_ops = {
 	.folio_accessed = (void *)s3fifo_folio_accessed,
 	.folio_evicted = (void *)s3fifo_folio_evicted,
 	.evict_folios = (void *)s3fifo_evict_folios,
+	.exit = (void *)s3fifo_exit,
+	.name = "s3fifo",
 };

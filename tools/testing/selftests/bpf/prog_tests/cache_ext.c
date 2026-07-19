@@ -296,6 +296,10 @@ static void subtest_s3fifo(void)
 	bpf_link__destroy(link);
 	link = NULL;
 	ASSERT_TRUE(stat_drains_to_zero(), "drained on detach");
+	/* exit() runs from the teardown worker; give it a moment. */
+	for (int i = 0; i < 50 && !skel->bss->nr_exits; i++)
+		usleep(100 * 1000);
+	ASSERT_GT(skel->bss->nr_exits, 0, "exit() ran on detach");
 out:
 	join_root_cgroup();
 	if (link)

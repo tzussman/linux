@@ -71,6 +71,7 @@ struct cache_ext_ops fifo_ops = {
 	.init = (void *)fifo_init,
 	.folio_added = (void *)fifo_folio_added,
 	.evict_folios = (void *)fifo_evict_folios,
+	.name = "fifo",
 };
 
 /* Second instance, for exercising live replacement via link update. */
@@ -79,6 +80,7 @@ struct cache_ext_ops fifo_ops2 = {
 	.init = (void *)fifo_init,
 	.folio_added = (void *)fifo_folio_added,
 	.evict_folios = (void *)fifo_evict_folios,
+	.name = "fifo2",
 };
 
 /*
@@ -94,6 +96,7 @@ s32 BPF_PROG(noop_init, struct mem_cgroup *memcg)
 SEC(".struct_ops.link")
 struct cache_ext_ops noop_ops = {
 	.init = (void *)noop_init,
+	.name = "noop",
 };
 
 /* A policy whose per-memcg setup always fails; attaching it must fail. */
@@ -106,4 +109,5 @@ s32 BPF_PROG(failing_init, struct mem_cgroup *memcg)
 SEC(".struct_ops.link")
 struct cache_ext_ops fail_ops = {
 	.init = (void *)failing_init,
+	.name = "failing",
 };

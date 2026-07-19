@@ -17,4 +17,5 @@ void BPF_PROG(sleepy_folio_added, struct folio *folio)
 SEC(".struct_ops.link")
 struct cache_ext_ops sleepy_ops = {
 	.folio_added = (void *)sleepy_folio_added,
+	.name = "sleepy",
 };
