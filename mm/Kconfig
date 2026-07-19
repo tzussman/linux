@@ -1435,6 +1435,20 @@ config LRU_GEN_WALKS_MMU
 	depends on LRU_GEN && ARCH_HAS_HW_PTE_YOUNG
 # }
 
+config CACHE_EXT
+	bool "BPF-managed page cache eviction policies"
+	depends on BPF_SYSCALL && BPF_JIT && MEMCG && CGROUP_BPF
+	help
+	  Enable support for implementing custom page cache eviction policies
+	  as BPF struct_ops programs. A policy is attached to a cgroup and
+	  takes ownership of the file folios it chooses to track: owned folios
+	  are moved off the kernel LRU onto policy-managed lists, and the
+	  policy decides which of them to evict under memory pressure. Folios
+	  the policy does not track, and all folios after the policy is
+	  detached, are reclaimed by the kernel as usual.
+
+	  If unsure, say N.
+
 config ARCH_SUPPORTS_PER_VMA_LOCK
        def_bool n
 

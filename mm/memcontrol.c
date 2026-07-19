@@ -5254,6 +5254,11 @@ static void uncharge_folio(struct folio *folio, struct uncharge_gather *ug)
 	struct obj_cgroup *objcg;
 
 	VM_BUG_ON_FOLIO(folio_test_lru(folio), folio);
+	/*
+	 * A folio still owned by a cache_ext policy list here means a
+	 * reference was dropped without claiming the folio back first.
+	 */
+	VM_WARN_ON_ONCE_FOLIO(folio_test_cache_ext(folio), folio);
 
 	/*
 	 * Nobody should be changing or seriously looking at

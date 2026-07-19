@@ -365,6 +365,55 @@ enum objext_flags {
 
 #define OBJEXTS_FLAGS_MASK (__NR_OBJEXTS_FLAGS - 1)
 
+/*
+ * The first bit after the page_memcg_data_flags is shared between two users
+ * that cannot collide: slabobj_ext vectors reserve it above as
+ * __OBJEXTS_FLAG_UNUSED, while cache_ext uses it on pagecache folios to mark
+ * a folio as owned by a BPF eviction policy list. Slab pages are never
+ * pagecache folios, so a set bit is always unambiguous, and both
+ * folio_objcg() and slab_obj_exts() already strip it when extracting the
+ * pointer.
+ */
+#define MEMCG_DATA_CACHE_EXT	__FIRST_OBJEXT_FLAG
+
+#ifdef CONFIG_CACHE_EXT
+/*
+ * A folio owned by a cache_ext policy list is off the kernel LRU: PG_lru is
+ * clear, folio->lru links it into a policy list, and the list holds one
+ * folio reference. MEMCG_DATA_CACHE_EXT records that ownership, and its
+ * test-and-clear is the single arbitration point between eviction,
+ * truncation, and policy teardown: whoever clears the bit unlinks the folio
+ * and inherits the list's reference.
+ *
+ * Atomic bitops on ->memcg_data are safe here because nothing else writes
+ * the word while the bit can be set: a pagecache folio is charged
+ * (commit_charge()) before it can be placed on a policy list, it is
+ * uncharged only after removal from the page cache has claimed it back, and
+ * it cannot be migrated while owned because it is not on the LRU.
+ */
+static inline bool folio_test_cache_ext(const struct folio *folio)
+{
+	return READ_ONCE(folio->memcg_data) & MEMCG_DATA_CACHE_EXT;
+}
+
+static inline bool folio_test_set_cache_ext(struct folio *folio)
+{
+	return test_and_set_bit(ilog2(MEMCG_DATA_CACHE_EXT),
+				&folio->memcg_data);
+}
+
+static inline bool folio_test_clear_cache_ext(struct folio *folio)
+{
+	return test_and_clear_bit(ilog2(MEMCG_DATA_CACHE_EXT),
+				  &folio->memcg_data);
+}
+#else /* CONFIG_CACHE_EXT */
+static inline bool folio_test_cache_ext(const struct folio *folio)
+{
+	return false;
+}
+#endif /* CONFIG_CACHE_EXT */
+
 #ifdef CONFIG_MEMCG
 /*
  * After the initialization objcg->memcg is always pointing at
