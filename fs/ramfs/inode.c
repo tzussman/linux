@@ -73,6 +73,7 @@ struct inode *ramfs_get_inode(struct super_block *sb,
 		case S_IFREG:
 			inode->i_op = &ramfs_file_inode_operations;
 			inode->i_fop = &ramfs_file_operations;
+			mapping_set_large_folios(inode->i_mapping);
 			break;
 		case S_IFDIR:
 			inode->i_op = &ramfs_dir_inode_operations;
