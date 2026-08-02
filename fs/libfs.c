@@ -944,9 +944,10 @@ int simple_write_begin(const struct kiocb *iocb, struct address_space *mapping,
 			loff_t pos, unsigned len,
 			struct folio **foliop, void **fsdata)
 {
+	fgf_t fgp = FGP_WRITEBEGIN | fgf_set_order(len);
 	struct folio *folio;
 
-	folio = __filemap_get_folio(mapping, pos / PAGE_SIZE, FGP_WRITEBEGIN,
+	folio = __filemap_get_folio(mapping, pos / PAGE_SIZE, fgp,
 			mapping_gfp_mask(mapping));
 	if (IS_ERR(folio))
 		return PTR_ERR(folio);
