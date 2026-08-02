@@ -205,7 +205,9 @@ static unsigned long ramfs_nommu_get_unmapped_area(struct file *file,
 {
 	unsigned long maxpages, lpages, nr_folios, loop, ret, nr_pages, pfn;
 	struct inode *inode = file_inode(file);
+	unsigned long first = pgoff;
 	struct folio_batch fbatch;
+	unsigned long skip = 0;
 	loff_t isize;
 
 	/* the mapping mustn't extend beyond the EOF */
@@ -228,20 +230,32 @@ repeat:
 			ULONG_MAX, &fbatch);
 	if (!nr_folios) {
 		ret = -ENOSYS;
-		return ret;
+		goto out_free;
 	}
 
 	if (ret == -ENOSYS) {
-		ret = (unsigned long) folio_address(fbatch.folios[0]);
-		pfn = folio_pfn(fbatch.folios[0]);
+		struct folio *folio = fbatch.folios[0];
+
+		/*
+		 * The requested offset may land inside the first folio rather
+		 * than on its first page, so start from there rather than
+		 * from the front of the folio.
+		 */
+		skip = first - folio->index;
+		ret = (unsigned long)folio_address(folio) +
+			(skip << PAGE_SHIFT);
+		pfn = folio_pfn(folio) + skip;
 	}
 	/* check the pages for physical adjacency */
 	for (loop = 0; loop < nr_folios; loop++) {
-		if (pfn + nr_pages != folio_pfn(fbatch.folios[loop])) {
+		struct folio *folio = fbatch.folios[loop];
+
+		if (pfn + nr_pages != folio_pfn(folio) + skip) {
 			ret = -ENOSYS;
 			goto out_free; /* leave if not physical adjacent */
 		}
-		nr_pages += folio_nr_pages(fbatch.folios[loop]);
+		nr_pages += folio_nr_pages(folio) - skip;
+		skip = 0;
 		if (nr_pages >= lpages)
 			goto out_free; /* successfully found desired pages*/
 	}
