@@ -90,32 +90,31 @@ int ramfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize)
 	if (!data)
 		return -ENOMEM;
 
-	/* attach all the pages to the inode's address space */
+	/* attach all the folios to the inode's address space */
 	for (loop = 0; loop < npages; loop++) {
-		struct page *page = virt_to_page(data + (loop << PAGE_SHIFT));
+		struct folio *folio = virt_to_folio(data + (loop << PAGE_SHIFT));
 
-		ret = add_to_page_cache_lru(page, inode->i_mapping, loop,
-					gfp);
+		ret = filemap_add_folio(inode->i_mapping, folio, loop, gfp);
 		if (ret < 0)
 			goto add_error;
 
-		/* prevent the page from being discarded on memory pressure */
-		SetPageDirty(page);
-		SetPageUptodate(page);
+		/* prevent the folio from being discarded on memory pressure */
+		folio_mark_dirty(folio);
+		folio_mark_uptodate(folio);
 
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 	}
 
 	return 0;
 
 add_error:
 	/*
-	 * The run is already split and the pages handed over belong to the
+	 * The run is already split and the folios handed over belong to the
 	 * page cache now, so free_pages_exact() cannot be used on the rest.
 	 */
 	while (loop < npages)
-		__free_page(virt_to_page(data + (loop++ << PAGE_SHIFT)));
+		folio_put(virt_to_folio(data + (loop++ << PAGE_SHIFT)));
 	return ret;
 }
 
