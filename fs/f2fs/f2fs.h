@@ -1681,7 +1681,10 @@ struct compress_ctx {
 	pgoff_t cluster_idx;		/* cluster index number */
 	unsigned int cluster_size;	/* page count in cluster */
 	unsigned int log_cluster_size;	/* log of cluster size */
-	struct page **rpages;		/* pages store raw data in cluster */
+	union {
+		struct page **rpages;	/* pages store raw data in cluster */
+		struct folio **rfolios;
+	};
 	unsigned int nr_rpages;		/* total page number in rpages */
 	struct page **cpages;		/* pages store compressed data in cluster */
 	unsigned int nr_cpages;		/* total page number in cpages */
@@ -1699,7 +1702,10 @@ struct compress_ctx {
 struct compress_io_ctx {
 	u32 magic;			/* magic number to indicate page is compressed */
 	struct inode *inode;		/* inode the context belong to */
-	struct page **rpages;		/* pages store raw data in cluster */
+	union {
+		struct page **rpages;	/* pages store raw data in cluster */
+		struct folio **rfolios;
+	};
 	unsigned int nr_rpages;		/* total page number in rpages */
 	atomic_t pending_pages;		/* in-flight compressed page count */
 };
@@ -1712,7 +1718,10 @@ struct decompress_io_ctx {
 	pgoff_t cluster_idx;		/* cluster index number */
 	unsigned int cluster_size;	/* page count in cluster */
 	unsigned int log_cluster_size;	/* log of cluster size */
-	struct page **rpages;		/* pages store raw data in cluster */
+	union {
+		struct page **rpages;	/* pages store raw data in cluster */
+		struct folio **rfolios;
+	};
 	unsigned int nr_rpages;		/* total page number in rpages */
 	struct page **cpages;		/* pages store compressed data in cluster */
 	unsigned int nr_cpages;		/* total page number in cpages */
