@@ -1438,7 +1438,7 @@ static int f2fs_write_compressed_pages(struct compress_ctx *cc,
 		.old_blkaddr = NEW_ADDR,
 		.folio = NULL,
 		.folio_blkcnt = 1,
-		.compressed_page = NULL,
+		.compressed_folio = NULL,
 		.io_type = io_type,
 		.io_wbc = wbc,
 	};
