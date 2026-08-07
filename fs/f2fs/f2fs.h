@@ -1362,10 +1362,7 @@ struct f2fs_io_info {
 		struct folio *folio;
 	};
 	struct folio *encrypted_folio;	/* encrypted folio */
-	union {
-		struct page *compressed_page;	/* compressed page */
-		struct folio *compressed_folio;
-	};
+	struct folio *compressed_folio;	/* compressed folio */
 	struct list_head list;		/* serialize IOs */
 	unsigned int compr_blocks;	/* # of compressed block addresses */
 	unsigned int need_lock:8;	/* indicate we need to lock cp_rwsem */
