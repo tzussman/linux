@@ -1289,8 +1289,8 @@ next:
 
 	verify_fio_blkaddr(fio);
 
-	if (fio->compressed_page)
-		bio_folio = page_folio(fio->compressed_page);
+	if (fio->compressed_folio)
+		bio_folio = fio->compressed_folio;
 	else
 		bio_folio = fio->folio;
 
@@ -1300,7 +1300,7 @@ next:
 	fio_lblk = F2FS_FIO_LBLK(fio);
 	fio_cnt = F2FS_FIO_BLKCNT(fio);
 
-	type = WB_DATA_TYPE(bio_folio, fio->compressed_page);
+	type = WB_DATA_TYPE(bio_folio, fio->compressed_folio);
 	for (unsigned int i = 0; i < fio_cnt; i++)
 		inc_cache_count(sbi, type);
 
