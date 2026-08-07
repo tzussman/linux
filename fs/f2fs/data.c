@@ -529,10 +529,10 @@ static void f2fs_set_bio_crypt_ctx(struct bio *bio, const struct inode *inode,
 				  gfp_t gfp_mask)
 {
 	/*
-	 * The f2fs garbage collector sets ->encrypted_page when it wants to
+	 * The f2fs garbage collector sets ->encrypted_folio when it wants to
 	 * read/write raw data without encryption.
 	 */
-	if (!fio || !fio->encrypted_page)
+	if (!fio || !fio->encrypted_folio)
 		fscrypt_set_bio_crypt_ctx(bio, inode,
 				(loff_t)first_idx << inode->i_blkbits,
 				gfp_mask);
@@ -543,10 +543,10 @@ static bool f2fs_crypt_mergeable_bio(struct bio *bio, const struct inode *inode,
 				     const struct f2fs_io_info *fio)
 {
 	/*
-	 * The f2fs garbage collector sets ->encrypted_page when it wants to
+	 * The f2fs garbage collector sets ->encrypted_folio when it wants to
 	 * read/write raw data without encryption.
 	 */
-	if (fio && fio->encrypted_page)
+	if (fio && fio->encrypted_folio)
 		return !bio_has_crypt_ctx(bio);
 
 	return fscrypt_mergeable_bio(bio, inode,
@@ -752,8 +752,7 @@ int f2fs_submit_page_bio(struct f2fs_io_info *fio)
 {
 	struct bio *bio;
 	struct folio *fio_folio = fio->folio;
-	struct folio *data_folio = fio->encrypted_page ?
-			page_folio(fio->encrypted_page) : fio_folio;
+	struct folio *data_folio = fio->encrypted_folio ?: fio_folio;
 
 	if (!f2fs_is_valid_blkaddr(fio->sbi, fio->new_blkaddr,
 			fio->is_por ? META_POR : (__is_meta_io(fio) ?
@@ -975,8 +974,7 @@ void f2fs_submit_all_merged_ipu_writes(struct f2fs_sb_info *sbi)
 int f2fs_merge_page_bio(struct f2fs_io_info *fio)
 {
 	struct bio *bio = *fio->bio;
-	struct folio *data_folio = fio->encrypted_page ?
-			page_folio(fio->encrypted_page) : fio->folio;
+	struct folio *data_folio = fio->encrypted_folio ?: fio->folio;
 	struct folio *folio = fio->folio;
 
 	if (!f2fs_is_valid_blkaddr(fio->sbi, fio->new_blkaddr,
@@ -1069,17 +1067,17 @@ next:
 
 	verify_fio_blkaddr(fio);
 
-	if (fio->encrypted_page)
-		bio_folio = page_folio(fio->encrypted_page);
-	else if (fio->compressed_page)
-		bio_folio = page_folio(fio->compressed_page);
+	if (fio->encrypted_folio)
+		bio_folio = fio->encrypted_folio;
+	else if (fio->compressed_folio)
+		bio_folio = fio->compressed_folio;
 	else
 		bio_folio = fio->folio;
 
 	/* set submitted = true as a return value */
 	fio->submitted = 1;
 
-	type = WB_DATA_TYPE(bio_folio, fio->compressed_page);
+	type = WB_DATA_TYPE(bio_folio, fio->compressed_folio);
 	inc_page_count(sbi, type);
 
 	if (io->bio &&
