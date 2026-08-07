@@ -3128,13 +3128,6 @@ static inline void f2fs_folio_put(struct folio *folio, bool unlock)
 	folio_put(folio);
 }
 
-static inline void f2fs_put_page(struct page *page, bool unlock)
-{
-	if (!page)
-		return;
-	f2fs_folio_put(page_folio(page), unlock);
-}
-
 static inline void f2fs_put_dnode(struct dnode_of_data *dn)
 {
 	if (dn->node_folio)
