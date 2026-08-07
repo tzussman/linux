@@ -4128,8 +4128,6 @@ void f2fs_update_device_state(struct f2fs_sb_info *sbi, nid_t ino,
 					block_t blkaddr, unsigned int blkcnt);
 void f2fs_folio_wait_writeback(struct folio *folio, enum page_type type,
 		bool ordered, bool locked);
-#define f2fs_wait_on_page_writeback(page, type, ordered, locked)	\
-		f2fs_folio_wait_writeback(page_folio(page), type, ordered, locked)
 void f2fs_wait_on_block_writeback(struct inode *inode, block_t blkaddr);
 void f2fs_wait_on_block_writeback_range(struct inode *inode, block_t blkaddr,
 								block_t len);

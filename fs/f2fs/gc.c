@@ -1413,7 +1413,7 @@ static int move_data_block(struct inode *inode, block_t bidx,
 		goto up_out;
 	}
 
-	fio.encrypted_page = folio_file_page(mfolio, fio.old_blkaddr);
+	fio.encrypted_folio = mfolio;
 
 	/* read source block in mfolio */
 	if (!folio_test_uptodate(mfolio)) {
@@ -1456,21 +1456,21 @@ static int move_data_block(struct inode *inode, block_t bidx,
 		goto recover_block;
 	}
 
-	fio.encrypted_page = &efolio->page;
+	fio.encrypted_folio = efolio;
 
 	/* write target block */
-	f2fs_wait_on_page_writeback(fio.encrypted_page, DATA, true, true);
-	memcpy(page_address(fio.encrypted_page),
+	f2fs_folio_wait_writeback(fio.encrypted_folio, DATA, true, true);
+	memcpy(folio_address(fio.encrypted_folio),
 				folio_address(mfolio), PAGE_SIZE);
 	f2fs_folio_put(mfolio, true);
 
 	f2fs_invalidate_internal_cache(fio.sbi, fio.old_blkaddr, 1);
 
-	set_page_dirty(fio.encrypted_page);
-	if (clear_page_dirty_for_io(fio.encrypted_page))
+	folio_mark_dirty(fio.encrypted_folio);
+	if (folio_clear_dirty_for_io(fio.encrypted_folio))
 		dec_page_count(fio.sbi, F2FS_DIRTY_META);
 
-	set_page_writeback(fio.encrypted_page);
+	folio_start_writeback(fio.encrypted_folio);
 
 	fio.op = REQ_OP_WRITE;
 	fio.op_flags = REQ_SYNC;
@@ -1482,7 +1482,7 @@ static int move_data_block(struct inode *inode, block_t bidx,
 	f2fs_update_data_blkaddr(&dn, newaddr);
 	set_inode_flag(inode, FI_APPEND_WRITE);
 
-	f2fs_put_page(fio.encrypted_page, true);
+	f2fs_folio_put(fio.encrypted_folio, true);
 recover_block:
 	if (err)
 		f2fs_do_replace_block(fio.sbi, &sum, newaddr, fio.old_blkaddr,
