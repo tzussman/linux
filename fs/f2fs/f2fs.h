@@ -1357,10 +1357,7 @@ struct f2fs_io_info {
 	blk_opf_t op_flags;	/* req_flag_bits */
 	block_t new_blkaddr;	/* new block address to be written */
 	block_t old_blkaddr;	/* old block address before Cow */
-	union {
-		struct page *page;	/* page to be written */
-		struct folio *folio;
-	};
+	struct folio *folio;		/* folio to be written */
 	struct folio *encrypted_folio;	/* encrypted folio */
 	struct folio *compressed_folio;	/* compressed folio */
 	struct list_head list;		/* serialize IOs */
