@@ -5008,7 +5008,7 @@ enum cluster_check_type {
 bool f2fs_is_compressed_page(struct folio *folio);
 struct folio *f2fs_compress_control_folio(struct folio *folio);
 int f2fs_prepare_compress_overwrite(struct inode *inode,
-			struct page **pagep, pgoff_t lblk, void **fsdata);
+			struct folio **foliop, pgoff_t lblk, void **fsdata);
 bool f2fs_compress_write_end(struct inode *inode, void *fsdata,
 					pgoff_t lblk, unsigned int copied);
 int f2fs_truncate_partial_cluster(struct inode *inode, u64 from, bool lock);

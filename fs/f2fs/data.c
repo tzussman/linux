@@ -4563,7 +4563,7 @@ readd:
 #ifdef CONFIG_F2FS_FS_COMPRESSION
 			if (f2fs_compressed_file(inode)) {
 				void *fsdata = NULL;
-				struct page *pagep;
+				struct folio *foliop;
 				int ret2;
 				pgoff_t f_lblk = f2fs_folio_lblk(sbi, folio);
 
@@ -4592,7 +4592,7 @@ readd:
 					goto lock_folio;
 
 				ret2 = f2fs_prepare_compress_overwrite(
-							inode, &pagep,
+							inode, &foliop,
 							f_lblk, &fsdata);
 				if (ret2 < 0) {
 					ret = ret2;
@@ -5601,7 +5601,6 @@ static int f2fs_write_begin(const struct kiocb *iocb,
 	if (f2fs_compressed_file(inode) &&
 	    !mapping_large_folio_support(inode->i_mapping)) {
 		int ret;
-		struct page *page;
 
 		*fsdata = NULL;
 
@@ -5610,13 +5609,12 @@ static int f2fs_write_begin(const struct kiocb *iocb,
 		if (len == PAGE_SIZE && !(f2fs_is_atomic_file(inode)))
 			goto repeat;
 
-		ret = f2fs_prepare_compress_overwrite(inode, &page,
+		ret = f2fs_prepare_compress_overwrite(inode, foliop,
 							f_lblk, fsdata);
 		if (ret < 0) {
 			err = ret;
 			goto fail;
 		} else if (ret) {
-			*foliop = page_folio(page);
 			return 0;
 		}
 	}

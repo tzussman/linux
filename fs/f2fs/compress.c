@@ -1213,7 +1213,7 @@ static void set_cluster_dirty(struct compress_ctx *cc)
 }
 
 static int prepare_compress_overwrite(struct compress_ctx *cc,
-		struct page **pagep, pgoff_t lblk, void **fsdata)
+		struct folio **foliop, pgoff_t lblk, void **fsdata)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(cc->inode);
 	struct address_space *mapping = cc->inode->i_mapping;
@@ -1271,7 +1271,7 @@ retry:
 	for (i = 0; i < nr_folios; i++) {
 		pgoff_t f_index = f2fs_lblk_to_folio_index(sbi, start_idx) + i;
 
-		f2fs_bug_on(sbi, cc->rpages[i]);
+		f2fs_bug_on(sbi, cc->rfolios[i]);
 
 		folio = filemap_lock_folio(mapping, f_index);
 		if (IS_ERR(folio)) {
@@ -1293,8 +1293,8 @@ release_and_retry:
 	}
 
 	if (likely(!ret)) {
-		*fsdata = cc->rpages;
-		*pagep = cc->rpages[offset_in_cluster(cc, lblk)];
+		*fsdata = cc->rfolios;
+		*foliop = cc->rfolios[offset_in_cluster(cc, lblk)];
 		return cc->cluster_size;
 	}
 
@@ -1307,7 +1307,7 @@ out:
 }
 
 int f2fs_prepare_compress_overwrite(struct inode *inode,
-		struct page **pagep, pgoff_t lblk, void **fsdata)
+		struct folio **foliop, pgoff_t lblk, void **fsdata)
 {
 	struct compress_ctx cc = {
 		.inode = inode,
@@ -1319,7 +1319,7 @@ int f2fs_prepare_compress_overwrite(struct inode *inode,
 		.vi = NULL, /* can't write to fsverity files */
 	};
 
-	return prepare_compress_overwrite(&cc, pagep, lblk, fsdata);
+	return prepare_compress_overwrite(&cc, foliop, lblk, fsdata);
 }
 
 bool f2fs_compress_write_end(struct inode *inode, void *fsdata,
@@ -1330,9 +1330,9 @@ bool f2fs_compress_write_end(struct inode *inode, void *fsdata,
 		.inode = inode,
 		.log_cluster_size = F2FS_I(inode)->i_log_cluster_size,
 		.cluster_size = F2FS_I(inode)->i_cluster_size,
-		.rpages = fsdata,
+		.rfolios = fsdata,
 	};
-	struct folio *folio = page_folio(cc.rpages[0]);
+	struct folio *folio = cc.rfolios[0];
 	bool first_index = (lblk == f2fs_folio_lblk(F2FS_I_SB(inode), folio));
 
 	if (copied)
@@ -1348,8 +1348,8 @@ int f2fs_truncate_partial_cluster(struct inode *inode, u64 from, bool lock)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	void *fsdata = NULL;
-	struct page *pagep;
-	struct page **rpages;
+	struct folio *foliop;
+	struct folio **rfolios;
 	int log_cluster_size = F2FS_I(inode)->i_log_cluster_size;
 	pgoff_t start_idx = (from >> (sbi->log_blocksize + log_cluster_size)) <<
 							log_cluster_size;
@@ -1368,7 +1368,7 @@ repeat:
 		return f2fs_do_truncate_blocks(inode, from, lock);
 
 	/* truncate compressed cluster */
-	err = f2fs_prepare_compress_overwrite(inode, &pagep,
+	err = f2fs_prepare_compress_overwrite(inode, &foliop,
 						start_idx, &fsdata);
 	if (err < 0)
 		return err;
@@ -1376,10 +1376,10 @@ repeat:
 		/* the cluster became non-compressed one due to race case */
 		goto repeat;
 
-	rpages = fsdata;
+	rfolios = fsdata;
 
 	for (i = nr_folios - 1; i >= 0; i--) {
-		struct folio *folio = page_folio(rpages[i]);
+		struct folio *folio = rfolios[i];
 		loff_t start = folio_pos(folio);
 		loff_t offset = from > start ? from - start : 0;
 
