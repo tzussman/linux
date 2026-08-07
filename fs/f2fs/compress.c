@@ -1564,7 +1564,7 @@ static int f2fs_write_compressed_pages(struct compress_ctx *cc,
 		c_folio_idx = blk_idx >> F2FS_LOG_BLKS_PER_PAGE(sbi);
 		c_folio_ofs = blk_idx % F2FS_BLKS_PER_PAGE(sbi);
 
-		fio.compressed_page = cic->cpages[c_folio_idx];
+		fio.compressed_folio = page_folio(cic->cpages[c_folio_idx]);
 		fio.folio_offset = c_folio_ofs;
 
 		fio.submitted = 0;
