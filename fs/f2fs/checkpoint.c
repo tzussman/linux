@@ -264,7 +264,7 @@ static struct folio *__get_meta_folio(struct f2fs_sb_info *sbi, pgoff_t index,
 		.op_flags = REQ_META | REQ_PRIO,
 		.old_blkaddr = index,
 		.new_blkaddr = index,
-		.encrypted_page = NULL,
+		.encrypted_folio = NULL,
 		.is_por = !is_meta ? 1 : 0,
 	};
 	int err;
@@ -456,7 +456,7 @@ int f2fs_ra_meta_pages(struct f2fs_sb_info *sbi, block_t start, int nrpages,
 		.type = META,
 		.op = REQ_OP_READ,
 		.op_flags = sync ? (REQ_META | REQ_PRIO) : REQ_RAHEAD,
-		.encrypted_page = NULL,
+		.encrypted_folio = NULL,
 		.in_list = 0,
 		.is_por = (type == META_POR) ? 1 : 0,
 	};

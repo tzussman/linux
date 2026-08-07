@@ -1361,10 +1361,7 @@ struct f2fs_io_info {
 		struct page *page;	/* page to be written */
 		struct folio *folio;
 	};
-	union {
-		struct page *encrypted_page;	/* encrypted page */
-		struct folio *encrypted_folio;
-	};
+	struct folio *encrypted_folio;	/* encrypted folio */
 	union {
 		struct page *compressed_page;	/* compressed page */
 		struct folio *compressed_folio;

@@ -4138,7 +4138,7 @@ void f2fs_do_write_meta_page(struct f2fs_sb_info *sbi, struct folio *folio,
 		.old_blkaddr = folio->index,
 		.new_blkaddr = folio->index,
 		.folio = folio,
-		.encrypted_page = NULL,
+		.encrypted_folio = NULL,
 		.in_list = 0,
 	};
 

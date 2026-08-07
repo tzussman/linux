@@ -1225,7 +1225,7 @@ static int ra_data_block(struct inode *inode, pgoff_t index)
 		.temp = COLD,
 		.op = REQ_OP_READ,
 		.op_flags = 0,
-		.encrypted_page = NULL,
+		.encrypted_folio = NULL,
 		.in_list = 0,
 	};
 	int err = 0;
@@ -1335,7 +1335,7 @@ static int move_data_block(struct inode *inode, block_t bidx,
 		.temp = COLD,
 		.op = REQ_OP_READ,
 		.op_flags = 0,
-		.encrypted_page = NULL,
+		.encrypted_folio = NULL,
 		.in_list = 0,
 	};
 	struct dnode_of_data dn;
@@ -1536,7 +1536,7 @@ static int move_data_page(struct inode *inode, block_t bidx, int gc_type,
 			.op_flags = REQ_SYNC,
 			.old_blkaddr = NULL_ADDR,
 			.folio = folio,
-			.encrypted_page = NULL,
+			.encrypted_folio = NULL,
 			.need_lock = LOCK_REQ,
 			.io_type = FS_GC_DATA_IO,
 		};
