@@ -3229,8 +3229,8 @@ static int f2fs_write_cache_pages(struct address_space *mapping,
 {
 	int ret = 0;
 	int done = 0, retry = 0;
-	struct page *pages_local[F2FS_ONSTACK_PAGES];
-	struct page **pages = pages_local;
+	struct folio *folios_local[F2FS_ONSTACK_PAGES];
+	struct folio **folios = folios_local;
 	struct folio_batch fbatch;
 	struct f2fs_sb_info *sbi = F2FS_M_SB(mapping);
 	struct bio *bio = NULL;
@@ -3267,7 +3267,7 @@ static int f2fs_write_cache_pages(struct address_space *mapping,
 #ifdef CONFIG_F2FS_FS_COMPRESSION
 	if (f2fs_compressed_file(inode) &&
 		1 << cc.log_cluster_size > F2FS_ONSTACK_PAGES) {
-		pages = f2fs_kzalloc(sbi, sizeof(struct page *) <<
+		folios = f2fs_kzalloc(sbi, sizeof(struct folio *) <<
 				cc.log_cluster_size, GFP_NOFS | __GFP_NOFAIL);
 		max_pages = 1 << cc.log_cluster_size;
 	}
@@ -3313,7 +3313,7 @@ again:
 			idx = 0;
 			p = folio_nr_pages(folio);
 add_more:
-			pages[nr_pages] = folio_page(folio, idx);
+			folios[nr_pages] = folio;
 			folio_get(folio);
 			if (++nr_pages == max_pages) {
 				index = folio->index + idx + 1;
@@ -3327,8 +3327,7 @@ add_more:
 		goto again;
 write:
 		for (i = 0; i < nr_pages; i++) {
-			struct page *page = pages[i];
-			struct folio *folio = page_folio(page);
+			struct folio *folio = folios[i];
 			bool need_readd;
 readd:
 			need_readd = false;
@@ -3359,8 +3358,8 @@ readd:
 				if (!f2fs_cluster_is_empty(&cc))
 					goto lock_folio;
 
-				if (f2fs_all_cluster_page_ready(&cc,
-					pages, i, nr_pages, true))
+				if (f2fs_all_cluster_folio_ready(&cc,
+					folios, i, nr_pages, true))
 					goto lock_folio;
 
 				ret2 = f2fs_prepare_compress_overwrite(
@@ -3373,8 +3372,8 @@ readd:
 				} else if (ret2 &&
 					(!f2fs_compress_write_end(inode,
 						fsdata, folio->index, 1) ||
-					 !f2fs_all_cluster_page_ready(&cc,
-						pages, i, nr_pages,
+					 !f2fs_all_cluster_folio_ready(&cc,
+						folios, i, nr_pages,
 						false))) {
 					retry = 1;
 					break;
@@ -3462,7 +3461,7 @@ next:
 			if (need_readd)
 				goto readd;
 		}
-		release_pages(pages, nr_pages);
+		release_pages(folios, nr_pages);
 		cond_resched();
 	}
 #ifdef CONFIG_F2FS_FS_COMPRESSION
@@ -3497,8 +3496,8 @@ next:
 		f2fs_submit_merged_ipu_write(sbi, &bio, NULL);
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
-	if (pages != pages_local)
-		kfree(pages);
+	if (folios != folios_local)
+		kfree(folios);
 #endif
 
 	return ret;

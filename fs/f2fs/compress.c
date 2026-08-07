@@ -843,10 +843,10 @@ bool f2fs_cluster_can_merge_page(struct compress_ctx *cc, pgoff_t index)
 	return is_page_in_cluster(cc, index);
 }
 
-bool f2fs_all_cluster_page_ready(struct compress_ctx *cc, struct page **pages,
-				int index, int nr_pages, bool uptodate)
+bool f2fs_all_cluster_folio_ready(struct compress_ctx *cc, struct folio **folios,
+				int index, int nr_folios, bool uptodate)
 {
-	unsigned long pgidx = page_folio(pages[index])->index;
+	unsigned long pgidx = folios[index]->index;
 	int i = uptodate ? 0 : 1;
 
 	/*
@@ -856,11 +856,11 @@ bool f2fs_all_cluster_page_ready(struct compress_ctx *cc, struct page **pages,
 	if (uptodate && (pgidx % cc->cluster_size))
 		return false;
 
-	if (nr_pages - index < cc->cluster_size)
+	if (nr_folios - index < cc->cluster_size)
 		return false;
 
 	for (; i < cc->cluster_size; i++) {
-		struct folio *folio = page_folio(pages[index + i]);
+		struct folio *folio = folios[index + i];
 
 		if (folio->index != pgidx + i)
 			return false;
