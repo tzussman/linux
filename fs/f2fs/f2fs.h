@@ -1361,7 +1361,10 @@ struct f2fs_io_info {
 		struct page *page;	/* page to be written */
 		struct folio *folio;
 	};
-	struct page *encrypted_page;	/* encrypted page */
+	union {
+		struct page *encrypted_page;	/* encrypted page */
+		struct folio *encrypted_folio;
+	};
 	struct page *compressed_page;	/* compressed page */
 	struct list_head list;		/* serialize IOs */
 	unsigned int compr_blocks;	/* # of compressed block addresses */
