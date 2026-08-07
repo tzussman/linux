@@ -1292,15 +1292,15 @@ got_it:
 		goto put_folio;
 	}
 
-	fio.encrypted_page = &efolio->page;
+	fio.encrypted_folio = efolio;
 
 	if (folio_test_uptodate(efolio))
-		goto put_encrypted_page;
+		goto put_encrypted_folio;
 
 	err = f2fs_submit_page_bio(&fio);
 	if (err)
-		goto put_encrypted_page;
-	f2fs_put_page(fio.encrypted_page, false);
+		goto put_encrypted_folio;
+	f2fs_folio_put(fio.encrypted_folio, false);
 	f2fs_folio_put(folio, true);
 
 	f2fs_update_iostat(sbi, inode, FS_DATA_READ_IO, F2FS_BLKSIZE);
@@ -1309,8 +1309,8 @@ got_it:
 	if (atomic_inode)
 		iput(atomic_inode);
 	return 0;
-put_encrypted_page:
-	f2fs_put_page(fio.encrypted_page, true);
+put_encrypted_folio:
+	f2fs_folio_put(fio.encrypted_folio, true);
 put_folio:
 	f2fs_folio_put(folio, true);
 out_iput:
