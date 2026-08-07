@@ -5015,7 +5015,7 @@ void f2fs_end_read_compressed_page(struct folio *folio, size_t offset,
 				unsigned int nr_blocks, bool in_task);
 bool f2fs_cluster_is_empty(struct compress_ctx *cc);
 bool f2fs_cluster_can_merge_block(struct compress_ctx *cc, pgoff_t lblk);
-bool f2fs_all_cluster_page_ready(struct compress_ctx *cc, struct page **pages,
+bool f2fs_all_cluster_folio_ready(struct compress_ctx *cc, struct folio **folios,
 				int index, int nr_pages, bool uptodate);
 bool f2fs_sanity_check_cluster(struct dnode_of_data *dn);
 void f2fs_compress_ctx_add_page(struct compress_ctx *cc, struct folio *folio);

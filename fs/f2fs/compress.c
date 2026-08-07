@@ -924,12 +924,12 @@ bool f2fs_cluster_can_merge_block(struct compress_ctx *cc, pgoff_t lblk)
 	return is_block_in_cluster(cc, lblk);
 }
 
-bool f2fs_all_cluster_page_ready(struct compress_ctx *cc, struct page **pages,
+bool f2fs_all_cluster_folio_ready(struct compress_ctx *cc, struct folio **folios,
 				int index, int nr_pages, bool uptodate)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(cc->inode);
 	unsigned int nr_folios = cc->cluster_size >> F2FS_LOG_BLKS_PER_PAGE(sbi);
-	unsigned long pgidx = page_folio(pages[index])->index;
+	unsigned long pgidx = folios[index]->index;
 	int i = uptodate ? 0 : 1;
 
 	/*
@@ -943,7 +943,7 @@ bool f2fs_all_cluster_page_ready(struct compress_ctx *cc, struct page **pages,
 		return false;
 
 	for (; i < nr_folios; i++) {
-		struct folio *folio = page_folio(pages[index + i]);
+		struct folio *folio = folios[index + i];
 
 		if (folio->index != pgidx + i)
 			return false;
