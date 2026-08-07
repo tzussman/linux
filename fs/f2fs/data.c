@@ -2358,7 +2358,7 @@ int f2fs_read_multi_folios(struct compress_ctx *cc, struct bio **bio_ret,
 		if (for_write)
 			folio_put(folio);
 		cc->rfolios[i] = NULL;
-		cc->nr_rpages--;
+		cc->nr_rfolios--;
 	}
 
 	/* we are done since all pages are beyond EOF */
@@ -2673,9 +2673,9 @@ static int f2fs_mpage_readpages(struct inode *inode, struct fsverity_info *vi,
 		.log_cluster_size = F2FS_I(inode)->i_log_cluster_size,
 		.cluster_size = F2FS_I(inode)->i_cluster_size,
 		.cluster_idx = NULL_CLUSTER,
-		.rpages = NULL,
+		.rfolios = NULL,
 		.cpages = NULL,
-		.nr_rpages = 0,
+		.nr_rfolios = 0,
 		.nr_cpages = 0,
 	};
 	pgoff_t nc_cluster_idx = NULL_CLUSTER;
@@ -3240,8 +3240,8 @@ static int f2fs_write_cache_pages(struct address_space *mapping,
 		.log_cluster_size = F2FS_I(inode)->i_log_cluster_size,
 		.cluster_size = F2FS_I(inode)->i_cluster_size,
 		.cluster_idx = NULL_CLUSTER,
-		.rpages = NULL,
-		.nr_rpages = 0,
+		.rfolios = NULL,
+		.nr_rfolios = 0,
 		.cpages = NULL,
 		.valid_nr_cpages = 0,
 		.rbuf = NULL,

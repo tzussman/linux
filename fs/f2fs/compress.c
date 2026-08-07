@@ -143,18 +143,18 @@ struct folio *f2fs_compress_control_folio(struct folio *folio)
 
 int f2fs_init_compress_ctx(struct compress_ctx *cc)
 {
-	if (cc->rpages)
+	if (cc->rfolios)
 		return 0;
 
-	cc->rpages = page_array_alloc(F2FS_I_SB(cc->inode), cc->cluster_size);
-	return cc->rpages ? 0 : -ENOMEM;
+	cc->rfolios = page_array_alloc(F2FS_I_SB(cc->inode), cc->cluster_size);
+	return cc->rfolios ? 0 : -ENOMEM;
 }
 
 void f2fs_destroy_compress_ctx(struct compress_ctx *cc, bool reuse)
 {
-	page_array_free(F2FS_I_SB(cc->inode), cc->rpages, cc->cluster_size);
-	cc->rpages = NULL;
-	cc->nr_rpages = 0;
+	page_array_free(F2FS_I_SB(cc->inode), cc->rfolios, cc->cluster_size);
+	cc->rfolios = NULL;
+	cc->nr_rfolios = 0;
 	cc->nr_cpages = 0;
 	cc->valid_nr_cpages = 0;
 	if (!reuse)
@@ -170,7 +170,7 @@ void f2fs_compress_ctx_add_folio(struct compress_ctx *cc, struct folio *folio)
 
 	cluster_ofs = offset_in_cluster(cc, folio->index);
 	cc->rfolios[cluster_ofs] = folio;
-	cc->nr_rpages++;
+	cc->nr_rfolios++;
 	cc->cluster_idx = cluster_idx(cc, folio->index);
 }
 
@@ -617,6 +617,23 @@ static void *f2fs_vmap(struct page **pages, unsigned int count)
 	return buf;
 }
 
+/*
+ * Map @count order-0 folios to a contiguous virtual range. The folio
+ * pointers double as page pointers for vm_map_ram(), which does not hold
+ * for large folios.
+ */
+static void *f2fs_vmap_folios(struct folio **folios, unsigned int count)
+{
+	int i;
+
+	for (i = 0; i < count; i++) {
+		if (WARN_ON_ONCE(folio_order(folios[i])))
+			return NULL;
+	}
+
+	return f2fs_vmap((struct page **)folios, count);
+}
+
 static int f2fs_compress_pages(struct compress_ctx *cc)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(cc->inode);
@@ -649,7 +666,7 @@ static int f2fs_compress_pages(struct compress_ctx *cc)
 	for (i = 0; i < cc->nr_cpages; i++)
 		cc->cpages[i] = f2fs_compress_alloc_page();
 
-	cc->rbuf = f2fs_vmap(cc->rpages, cc->cluster_size);
+	cc->rbuf = f2fs_vmap_folios(cc->rfolios, cc->cluster_size);
 	if (!cc->rbuf) {
 		ret = -ENOMEM;
 		goto out_free_cpages;
@@ -828,12 +845,12 @@ static bool is_page_in_cluster(struct compress_ctx *cc, pgoff_t index)
 
 bool f2fs_cluster_is_empty(struct compress_ctx *cc)
 {
-	return cc->nr_rpages == 0;
+	return cc->nr_rfolios == 0;
 }
 
 static bool f2fs_cluster_is_full(struct compress_ctx *cc)
 {
-	return cc->cluster_size == cc->nr_rpages;
+	return cc->cluster_size == cc->nr_rfolios;
 }
 
 bool f2fs_cluster_can_merge_page(struct compress_ctx *cc, pgoff_t index)
@@ -1185,8 +1202,8 @@ int f2fs_prepare_compress_overwrite(struct inode *inode,
 		.log_cluster_size = F2FS_I(inode)->i_log_cluster_size,
 		.cluster_size = F2FS_I(inode)->i_cluster_size,
 		.cluster_idx = index >> F2FS_I(inode)->i_log_cluster_size,
-		.rpages = NULL,
-		.nr_rpages = 0,
+		.rfolios = NULL,
+		.nr_rfolios = 0,
 		.vi = NULL, /* can't write to fsverity files */
 	};
 
@@ -1347,11 +1364,11 @@ static int f2fs_write_compressed_pages(struct compress_ctx *cc,
 	cic->magic = F2FS_COMPRESSED_PAGE_MAGIC;
 	cic->inode = inode;
 	atomic_set(&cic->pending_pages, cc->valid_nr_cpages);
-	cic->rpages = page_array_alloc(sbi, cc->cluster_size);
-	if (!cic->rpages)
+	cic->rfolios = page_array_alloc(sbi, cc->cluster_size);
+	if (!cic->rfolios)
 		goto out_put_cic;
 
-	cic->nr_rpages = cc->cluster_size;
+	cic->nr_rfolios = cc->cluster_size;
 
 	for (i = 0; i < cc->valid_nr_cpages; i++) {
 		f2fs_set_compressed_page(cc->cpages[i], inode,
@@ -1441,7 +1458,7 @@ unlock_continue:
 	return 0;
 
 out_free_page_array:
-	page_array_free(sbi, cic->rpages, cc->cluster_size);
+	page_array_free(sbi, cic->rfolios, cc->cluster_size);
 out_put_cic:
 	kmem_cache_free(cic_entry_slab, cic);
 out_put_dnode:
@@ -1479,7 +1496,7 @@ void f2fs_compress_write_end_io(struct bio *bio, struct folio *folio)
 		return;
 	}
 
-	for (i = 0; i < cic->nr_rpages; i++) {
+	for (i = 0; i < cic->nr_rfolios; i++) {
 		struct folio *folio = cic->rfolios[i];
 
 		WARN_ON(!folio);
@@ -1487,7 +1504,7 @@ void f2fs_compress_write_end_io(struct bio *bio, struct folio *folio)
 		folio_end_writeback(folio);
 	}
 
-	page_array_free(sbi, cic->rpages, cic->nr_rpages);
+	page_array_free(sbi, cic->rfolios, cic->nr_rfolios);
 	kmem_cache_free(cic_entry_slab, cic);
 
 	/*
@@ -1695,8 +1712,8 @@ struct decompress_io_ctx *f2fs_alloc_dic(struct compress_ctx *cc)
 	if (!dic)
 		return ERR_PTR(-ENOMEM);
 
-	dic->rpages = page_array_alloc(sbi, cc->cluster_size);
-	if (!dic->rpages) {
+	dic->rfolios = page_array_alloc(sbi, cc->cluster_size);
+	if (!dic->rfolios) {
 		kmem_cache_free(dic_entry_slab, dic);
 		return ERR_PTR(-ENOMEM);
 	}
@@ -1716,7 +1733,7 @@ struct decompress_io_ctx *f2fs_alloc_dic(struct compress_ctx *cc)
 
 	for (i = 0; i < dic->cluster_size; i++)
 		dic->rfolios[i] = cc->rfolios[i];
-	dic->nr_rpages = cc->cluster_size;
+	dic->nr_rfolios = cc->cluster_size;
 
 	dic->cpages = page_array_alloc(sbi, dic->nr_cpages);
 	if (!dic->cpages) {
@@ -1773,7 +1790,7 @@ static void f2fs_free_dic(struct decompress_io_ctx *dic,
 		page_array_free(sbi, dic->cpages, dic->nr_cpages);
 	}
 
-	page_array_free(sbi, dic->rpages, dic->nr_rpages);
+	page_array_free(sbi, dic->rfolios, dic->nr_rfolios);
 	kmem_cache_free(dic_entry_slab, dic);
 }
 
