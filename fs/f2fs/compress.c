@@ -1327,7 +1327,7 @@ static int f2fs_write_compressed_pages(struct compress_ctx *cc,
 			goto out_put_dnode;
 	}
 
-	folio = page_folio(cc->rpages[last_index]);
+	folio = cc->rfolios[last_index];
 	psize = folio_next_pos(folio);
 
 	err = f2fs_get_node_info(fio.sbi, dn.nid, &ni, false);
@@ -1351,8 +1351,8 @@ static int f2fs_write_compressed_pages(struct compress_ctx *cc,
 
 	for (i = 0; i < cc->valid_nr_cpages; i++) {
 		f2fs_set_compressed_page(cc->cpages[i], inode,
-				page_folio(cc->rpages[i + 1])->index, cic);
-		fio.compressed_page = cc->cpages[i];
+				cc->rfolios[i + 1]->index, cic);
+		fio.compressed_folio = page_folio(cc->cpages[i]);
 
 		fio.old_blkaddr = data_blkaddr(dn.inode, dn.node_folio,
 						dn.ofs_in_node + i + 1);
@@ -1364,13 +1364,13 @@ static int f2fs_write_compressed_pages(struct compress_ctx *cc,
 	set_cluster_writeback(cc);
 
 	for (i = 0; i < cc->cluster_size; i++)
-		cic->rpages[i] = cc->rpages[i];
+		cic->rfolios[i] = cc->rfolios[i];
 
 	for (i = 0; i < cc->cluster_size; i++, dn.ofs_in_node++) {
 		block_t blkaddr;
 
 		blkaddr = f2fs_data_blkaddr(&dn);
-		fio.page = cc->rpages[i];
+		fio.folio = cc->rfolios[i];
 		fio.old_blkaddr = blkaddr;
 
 		/* cluster header */
@@ -1396,7 +1396,7 @@ static int f2fs_write_compressed_pages(struct compress_ctx *cc,
 
 		f2fs_bug_on(fio.sbi, blkaddr == NULL_ADDR);
 
-		fio.compressed_page = cc->cpages[i - 1];
+		fio.compressed_folio = page_folio(cc->cpages[i - 1]);
 
 		cc->cpages[i - 1] = NULL;
 		fio.submitted = 0;
