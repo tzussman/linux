@@ -3067,7 +3067,7 @@ int f2fs_write_single_data_page(struct folio *folio, int *submitted,
 	loff_t i_size = i_size_read(inode);
 	const pgoff_t end_index = ((unsigned long long)i_size)
 							>> PAGE_SHIFT;
-	loff_t psize = (loff_t)(folio->index + 1) << PAGE_SHIFT;
+	loff_t psize = folio_next_pos(folio);
 	unsigned offset = 0;
 	bool need_balance_fs = false;
 	bool quota_inode = IS_NOQUOTA(inode);
