@@ -576,6 +576,12 @@ static inline int pmd_protnone(pmd_t pmd)
 {
 	return pte_protnone(pmd_pte(pmd));
 }
+
+#define pud_protnone pud_protnone
+static inline int pud_protnone(pud_t pud)
+{
+	return pte_protnone(pud_pte(pud));
+}
 #endif /* CONFIG_ARCH_HAS_PTE_PROTNONE */
 
 #define pmd_present(pmd)	pte_present(pmd_pte(pmd))

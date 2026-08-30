@@ -2146,6 +2146,19 @@ static inline int pmd_protnone(pmd_t pmd)
 #endif
 #endif /* CONFIG_ARCH_HAS_PTE_PROTNONE */
 
+/*
+ * Architectures that can have PROT_NONE PUD leaves (userfaultfd RWP on
+ * PUD-sized hugetlb pages) must provide pud_protnone(); everyone else gets
+ * "always no", which is only correct if pud_present() is false for such
+ * entries (as on x86, where the default is nevertheless overridden).
+ */
+#ifndef pud_protnone
+static inline int pud_protnone(pud_t pud)
+{
+	return 0;
+}
+#endif
+
 #endif /* CONFIG_MMU */
 
 #ifdef CONFIG_HAVE_ARCH_HUGE_VMAP

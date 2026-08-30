@@ -661,6 +661,9 @@ static struct page *follow_huge_pud(struct vm_area_struct *vma,
 	if (!pud_present(pud))
 		return NULL;
 
+	if (pud_protnone(pud) && !gup_can_follow_protnone(vma, flags))
+		return NULL;
+
 	if ((flags & FOLL_WRITE) &&
 	    !can_follow_write_pud(pud, pfn_to_page(pfn), vma, flags))
 		return NULL;
@@ -3062,6 +3065,10 @@ static int gup_fast_pud_range(p4d_t *p4dp, p4d_t p4d, unsigned long addr,
 		if (unlikely(!pud_present(pud)))
 			return 0;
 		if (unlikely(pud_leaf(pud))) {
+			/* See gup_fast_pte_range() */
+			if (pud_protnone(pud))
+				return 0;
+
 			if (!gup_fast_pud_leaf(pud, pudp, addr, next, flags,
 					       pages, nr))
 				return 0;
