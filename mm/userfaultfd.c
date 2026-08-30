@@ -3893,6 +3893,7 @@ static int userfaultfd_unregister(struct userfaultfd_ctx *ctx,
 {
 	struct mm_struct *mm = ctx->mm;
 	struct vm_area_struct *vma, *prev, *cur;
+	struct userfaultfd_wake_range range;
 	int ret;
 	struct uffdio_range uffdio_unregister;
 	bool found;
@@ -4001,25 +4002,32 @@ static int userfaultfd_unregister(struct userfaultfd_ctx *ctx,
 			start = vma->vm_start;
 		vma_end = min(end, vma->vm_end);
 
-		if (userfaultfd_missing(vma)) {
-			/*
-			 * Wake any concurrent pending userfault while
-			 * we unregister, so they will not hang
-			 * permanently and it avoids userland to call
-			 * UFFDIO_WAKE explicitly.
-			 */
-			struct userfaultfd_wake_range range;
-			range.start = start;
-			range.len = vma_end - start;
-			wake_userfault(vma->vm_userfaultfd_ctx.ctx, &range);
-		}
-
 		vma = userfaultfd_clear_vma(&vmi, prev, vma,
 					    start, vma_end);
 		if (IS_ERR(vma)) {
 			ret = PTR_ERR(vma);
 			break;
 		}
+
+		/*
+		 * Wake any concurrent pending userfault while we unregister,
+		 * so they will not hang permanently and it avoids userland to
+		 * call UFFDIO_WAKE explicitly.
+		 *
+		 * This must happen *after* userfaultfd_clear_vma(): the mmap
+		 * write lock does not exclude per-VMA-locked faults, so a
+		 * faulter may have taken the VMA read lock and be on its way
+		 * into handle_userfault() while we run.  vma_start_write()
+		 * inside userfaultfd_clear_vma() waits for such readers to
+		 * drop the lock, i.e. for them to have queued themselves, so
+		 * only now is it guaranteed that we see every waiter.  Waking
+		 * before the drain lost these wakeups and left the faulter
+		 * asleep forever.  Wake all modes, not just MISSING; WP/RWP
+		 * PTEs were just resolved by userfaultfd_clear_vma() too.
+		 */
+		range.start = start;
+		range.len = vma_end - start;
+		wake_userfault(ctx, &range);
 
 skip:
 		prev = vma;
