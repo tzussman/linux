@@ -234,6 +234,8 @@ static long change_softleaf_pte(struct vm_area_struct *vma,
 		newpte = swp_entry_to_pte(entry);
 		if (pte_swp_soft_dirty(oldpte))
 			newpte = pte_swp_mksoft_dirty(newpte);
+		if (pte_swp_uffd(oldpte))
+			newpte = pte_swp_mkuffd(newpte);
 	} else if (softleaf_is_device_private_write(entry)) {
 		/*
 		 * We do not preserve soft-dirtiness. See

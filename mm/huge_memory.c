@@ -2711,6 +2711,8 @@ static void change_non_present_huge_pmd(struct mm_struct *mm,
 		newpmd = softleaf_to_pmd(entry);
 		if (pmd_swp_soft_dirty(*pmd))
 			newpmd = pmd_swp_mksoft_dirty(newpmd);
+		if (pmd_swp_uffd(*pmd))
+			newpmd = pmd_swp_mkuffd(newpmd);
 	} else if (softleaf_is_device_private_write(entry)) {
 		entry = make_readable_device_private_entry(swp_offset(entry));
 		newpmd = softleaf_to_pmd(entry);

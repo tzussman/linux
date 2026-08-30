@@ -6573,6 +6573,8 @@ long hugetlb_change_protection(struct vm_area_struct *vma,
 					entry = make_readable_migration_entry(
 								swp_offset(entry));
 				newpte = swp_entry_to_pte(entry);
+				if (pte_swp_uffd(pte))
+					newpte = pte_swp_mkuffd(newpte);
 				pages++;
 			}
 

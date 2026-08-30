@@ -399,7 +399,14 @@ static bool remove_migration_pte(struct folio *folio,
 
 		if (softleaf_is_migration_write(entry))
 			pte = pte_mkwrite(pte, vma);
-		else if (pte_swp_uffd(old_pte))
+		/*
+		 * A writable migration entry can carry the uffd bit (e.g.
+		 * PAGEMAP_SCAN WP_MATCHING applied it while the page was
+		 * being migrated).  pte_mkuffd() write-protects, so it must
+		 * come after pte_mkwrite() and must not be skipped for
+		 * writable entries -- see remove_migration_pmd().
+		 */
+		if (pte_swp_uffd(old_pte))
 			pte = pte_mkuffd(pte);
 
 		/* See do_swap_page(): restore PAGE_NONE for RWP */
