@@ -212,6 +212,14 @@ success_unlocked:
 out:
 	mm->brk = origbrk;
 	mmap_write_unlock(mm);
+	/*
+	 * A shrink that fails after vms_gather_munmap_vmas() has already run
+	 * userfaultfd_unmap_prep() on one or more VMAs (e.g. a later VMA in the
+	 * range is sealed, or a split fails) leaves the queued unmap events
+	 * pending.  Complete them so we do not leak the ctx reference and pin
+	 * ctx->mmap_changing forever.  Harmless when @uf is empty.
+	 */
+	userfaultfd_unmap_complete(mm, &uf);
 	return origbrk;
 }
 
