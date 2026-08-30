@@ -348,6 +348,17 @@ struct attribute_group khugepaged_attr_group = {
 };
 #endif /* CONFIG_SYSFS */
 
+/* Are all @nr PTEs starting at @pte none (not even PTE markers)? */
+static bool ptes_all_none(pte_t *pte, int nr)
+{
+	int i;
+
+	for (i = 0; i < nr; i++)
+		if (!pte_none(ptep_get(pte + i)))
+			return false;
+	return true;
+}
+
 static bool pte_none_or_zero(pte_t pte)
 {
 	if (pte_none(pte))
@@ -2054,6 +2065,17 @@ static enum scan_result try_collapse_pte_mapped_thp(struct mm_struct *mm, unsign
 				goto unlock;
 			}
 		}
+		/*
+		 * ptl was dropped after step 2. The folio lock stops the
+		 * page fault path, but a racing UFFDIO_POISON or
+		 * MADV_GUARD_INSTALL (mmap or per-VMA read lock, checks
+		 * only pte_none() under ptl) may have installed a PTE marker
+		 * into the now-empty table: that marker must not be freed.
+		 */
+		if (unlikely(!ptes_all_none(start_pte, HPAGE_PMD_NR))) {
+			flush_tlb_mm(mm);
+			goto unlock;
+		}
 	}
 	pgt_pmd = pmdp_collapse_flush(vma, haddr, pmd);
 	pmdp_get_lockless_sync();
@@ -2148,6 +2170,28 @@ static bool file_backed_vma_is_retractable(struct vm_area_struct *vma)
 	return true;
 }
 
+/*
+ * Check that the page table at @pmd holds no entries at all, not even PTE
+ * markers. Must be called with the PTE lock of that table held.
+ *
+ * The locked huge folio prevents page faults from re-populating the table,
+ * but UFFDIO_POISON and MADV_GUARD_INSTALL never look at the page cache:
+ * they only require pte_none() under ptl, so they can install a marker
+ * into a table we are about to free.
+ */
+static bool pte_table_is_empty(struct mm_struct *mm, pmd_t *pmd,
+			       unsigned long haddr)
+{
+	pte_t *start_pte = pte_offset_map(pmd, haddr);
+	bool empty;
+
+	if (!start_pte)
+		return false;
+	empty = ptes_all_none(start_pte, HPAGE_PMD_NR);
+	pte_unmap(start_pte);
+	return empty;
+}
+
 static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
 {
 	struct vm_area_struct *vma;
@@ -2208,9 +2252,12 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
 		 * it is still possible for a racing userfaultfd_ioctl() or
 		 * madvise() to have inserted ptes or markers.  Now that we hold
 		 * ptlock, repeating the retractable checks protects us from
-		 * races against the prior checks.
+		 * races against the prior checks, and verifying that the table
+		 * really is empty protects the markers those paths can install
+		 * without ever consulting the page cache.
 		 */
-		if (likely(file_backed_vma_is_retractable(vma))) {
+		if (likely(file_backed_vma_is_retractable(vma)) &&
+		    likely(pte_table_is_empty(mm, pmd, addr))) {
 			pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
 			pmdp_get_lockless_sync();
 			success = true;
