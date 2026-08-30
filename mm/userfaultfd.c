@@ -1535,10 +1535,16 @@ retry:
 		goto out;
 	}
 
-	/* Sanity checks before the operation */
+	/*
+	 * pte_offset_map_rw_nolock() above already validated a snapshot of
+	 * both PMDs, so if one of them is none or huge now it changed under
+	 * us (e.g. MADV_DONTNEED reclaiming the freshly allocated dst page
+	 * table, or a THP fault on src).  That is a transient race, not a
+	 * caller error: retry rather than failing with -EINVAL.
+	 */
 	if (pmd_none(*dst_pmd) || pmd_none(*src_pmd) ||
 	    pmd_trans_huge(*dst_pmd) || pmd_trans_huge(*src_pmd)) {
-		ret = -EINVAL;
+		ret = -EAGAIN;
 		goto out;
 	}
 
