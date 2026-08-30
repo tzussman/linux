@@ -1200,8 +1200,18 @@ static long shmem_free_swap(struct address_space *mapping,
 	}
 	xas_unlock_irq(&xas);
 
-	if (nr_pages)
-		swap_put_entries_direct(radix_to_swp_entry(radswap), nr_pages);
+	if (!nr_pages)
+		return 0;
+
+	/*
+	 * A swapin error marker owns no swap slot and was already dropped
+	 * from the inode's swapped/alloced accounting by
+	 * shmem_set_folio_swapin_error(): just remove it from the mapping.
+	 */
+	if (!softleaf_is_swap(radix_to_swp_entry(radswap)))
+		return 0;
+
+	swap_put_entries_direct(radix_to_swp_entry(radswap), nr_pages);
 
 	return nr_pages;
 }
@@ -2367,11 +2377,15 @@ static void shmem_set_folio_swapin_error(struct inode *inode, pgoff_t index,
 	folio_put_swap(folio, NULL);
 	swap_cache_del_folio(folio);
 	/*
-	 * Don't treat swapin error folio as alloced. Otherwise inode->i_blocks
-	 * won't be 0 when inode is released and thus trigger WARN_ON(i_blocks)
-	 * in shmem_evict_inode().
+	 * The swap slot is gone and nothing will ever be allocated for this
+	 * index again: drop it from swapped and let shmem_recalc_inode()
+	 * release the block, exactly as for a punched hole.  Decrementing
+	 * alloced as well (as this used to do) leaves alloced - swapped -
+	 * nrpages unchanged, so the block stayed accounted to the inode and
+	 * shmem_evict_inode() warned about i_blocks once shmem_free_swap()
+	 * stopped mis-freeing the marker as a swap entry.
 	 */
-	shmem_recalc_inode(inode, -nr_pages, -nr_pages);
+	shmem_recalc_inode(inode, 0, -nr_pages);
 }
 
 static int shmem_split_large_entry(struct inode *inode, pgoff_t index,
