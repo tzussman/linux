@@ -1124,6 +1124,28 @@ static int guard_install_set_pte(unsigned long addr, unsigned long next,
 	return 0;
 }
 
+/*
+ * Zap everything in [start, end) so that guard markers can be installed.
+ *
+ * A plain zap_vma_range() preserves uffd-wp PTE markers on file-backed VMAs
+ * and re-arms write-protected present PTEs as markers, so on a uffd-wp
+ * registered shmem mapping the range never becomes empty and the install
+ * loop below would restart_syscall() forever. Guard installation replaces
+ * whatever was there, just like truncation or unmapping, so drop the markers.
+ */
+static void guard_install_zap(struct vm_area_struct *vma, unsigned long start,
+			      unsigned long end)
+{
+	struct zap_details details = {
+		.zap_flags = ZAP_FLAG_DROP_MARKER,
+	};
+	struct mmu_gather tlb;
+
+	tlb_gather_mmu(&tlb, vma->vm_mm);
+	zap_vma_range_batched(&tlb, vma, start, end - start, &details);
+	tlb_finish_mmu(&tlb);
+}
+
 static long madvise_guard_install(struct madvise_behavior *madv_behavior)
 {
 	struct vm_area_struct *vma = madv_behavior->vma;
@@ -1204,7 +1226,7 @@ static long madvise_guard_install(struct madvise_behavior *madv_behavior)
 		 * OK some of the range have non-guard pages mapped, zap
 		 * them. This leaves existing guard pages in place.
 		 */
-		zap_vma_range(vma, range->start, range->end - range->start);
+		guard_install_zap(vma, range->start, range->end);
 	}
 
 	/*
