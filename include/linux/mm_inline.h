@@ -637,6 +637,8 @@ static inline pte_marker copy_pte_marker(
 	/* Only copy PTE markers if UFFD register matches. */
 	if ((srcm & PTE_MARKER_UFFD_WP) && userfaultfd_wp(dst_vma))
 		dstm |= PTE_MARKER_UFFD_WP;
+	if ((srcm & PTE_MARKER_UFFD_RWP) && userfaultfd_rwp(dst_vma))
+		dstm |= PTE_MARKER_UFFD_RWP;
 
 	return dstm;
 }

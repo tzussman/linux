@@ -481,6 +481,23 @@ static inline bool softleaf_is_uffd_wp_marker(softleaf_t entry)
 	return softleaf_to_marker(entry) & PTE_MARKER_UFFD_WP;
 }
 
+/**
+ * softleaf_is_uffd_rwp_marker() - Is this leaf entry a userfaultfd read-write
+ * protect marker?
+ * @entry: Leaf entry.
+ *
+ * Userfaultfd-specific.
+ *
+ * Returns: true if the leaf entry is a UFFD RWP marker, otherwise false.
+ */
+static inline bool softleaf_is_uffd_rwp_marker(softleaf_t entry)
+{
+	if (!softleaf_is_marker(entry))
+		return false;
+
+	return softleaf_to_marker(entry) & PTE_MARKER_UFFD_RWP;
+}
+
 #ifdef CONFIG_MIGRATION
 
 /**
@@ -562,6 +579,20 @@ static inline bool pte_is_uffd_wp_marker(pte_t pte)
 }
 
 /**
+ * pte_is_uffd_rwp_marker() - Does this PTE entry encode a userfaultfd
+ * read-write protect marker leaf entry?
+ * @pte: PTE entry.
+ *
+ * Returns: true if this PTE is a UFFD RWP marker leaf entry, otherwise false.
+ */
+static inline bool pte_is_uffd_rwp_marker(pte_t pte)
+{
+	const softleaf_t entry = softleaf_from_pte(pte);
+
+	return softleaf_is_uffd_rwp_marker(entry);
+}
+
+/**
  * pte_is_uffd_marker() - Does this PTE entry encode a userfault-specific marker
  * leaf entry?
  * @pte: PTE entry.
@@ -578,8 +609,10 @@ static inline bool pte_is_uffd_marker(pte_t pte)
 	if (!softleaf_is_marker(entry))
 		return false;
 
-	/* UFFD WP, poisoned swap entries are UFFD-handled. */
+	/* UFFD WP, RWP, poisoned swap entries are UFFD-handled. */
 	if (softleaf_is_uffd_wp_marker(entry))
+		return true;
+	if (softleaf_is_uffd_rwp_marker(entry))
 		return true;
 	if (softleaf_is_poison_marker(entry))
 		return true;

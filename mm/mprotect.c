@@ -416,10 +416,10 @@ static long change_pte_range(struct mmu_gather *tlb,
 			 * Nobody plays with any none ptes besides
 			 * userfaultfd when applying the protections.
 			 */
-			if (likely(!uffd_wp))
+			if (likely(!uffd_wp && !uffd_rwp))
 				continue;
 
-			if (userfaultfd_wp_use_markers(vma)) {
+			if (uffd_wp && userfaultfd_wp_use_markers(vma)) {
 				/*
 				 * For file-backed mem, we need to be able to
 				 * wr-protect a none pte, because even if the
@@ -428,6 +428,15 @@ static long change_pte_range(struct mmu_gather *tlb,
 				 */
 				set_pte_at(vma->vm_mm, addr, pte,
 					   make_pte_marker(PTE_MARKER_UFFD_WP));
+				pages++;
+			} else if (uffd_rwp && userfaultfd_rwp_use_markers(vma)) {
+				/*
+				 * Same for RWP: a file THP that was just split
+				 * by change_pmd_range() leaves the whole range
+				 * none, and the page cache still holds the data.
+				 */
+				set_pte_at(vma->vm_mm, addr, pte,
+					   make_pte_marker(PTE_MARKER_UFFD_RWP));
 				pages++;
 			}
 		} else  {
@@ -463,12 +472,14 @@ pgtable_split_needed(struct vm_area_struct *vma, unsigned long cp_flags)
 static inline bool
 pgtable_populate_needed(struct vm_area_struct *vma, unsigned long cp_flags)
 {
-	/* If not within ioctl(UFFDIO_WRITEPROTECT), then don't bother */
-	if (!(cp_flags & MM_CP_UFFD_WP))
-		return false;
-
 	/* Populate if the userfaultfd mode requires pte markers */
-	return userfaultfd_wp_use_markers(vma);
+	if (cp_flags & MM_CP_UFFD_WP)
+		return userfaultfd_wp_use_markers(vma);
+	if (cp_flags & MM_CP_UFFD_RWP)
+		return userfaultfd_rwp_use_markers(vma);
+
+	/* Not within ioctl(UFFDIO_WRITEPROTECT/RWPROTECT), don't bother */
+	return false;
 }
 
 /*

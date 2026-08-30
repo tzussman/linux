@@ -1983,7 +1983,8 @@ static pagemap_entry_t pte_to_pagemap_entry(struct pagemapread *pm,
 		flags |= PM_SWAP;
 		if (softleaf_has_pfn(entry))
 			page = softleaf_to_page(entry);
-		if (softleaf_is_uffd_wp_marker(entry))
+		if (softleaf_is_uffd_wp_marker(entry) ||
+		    softleaf_is_uffd_rwp_marker(entry))
 			flags |= PM_UFFD_WP;
 		if (softleaf_is_guard_marker(entry))
 			flags |=  PM_GUARD_REGION;

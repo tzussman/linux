@@ -312,6 +312,23 @@ static inline bool userfaultfd_wp_use_markers(struct vm_area_struct *vma)
 }
 
 /*
+ * RWP protection lives in the uffd bit of present PTEs.  On file-backed
+ * memory the PTE can be dropped behind userspace's back (reclaim of a
+ * shmem page, file THP split by change_protection(), ...) and the page
+ * re-populated from the page cache without any fault being reported, so
+ * such VMAs need a persistent marker (PTE_MARKER_UFFD_RWP), like WP does.
+ * Anonymous memory does not: a zapped anon PTE means the page is gone.
+ * hugetlb keeps its own PTE handling and is not covered here.
+ */
+static inline bool userfaultfd_rwp_use_markers(struct vm_area_struct *vma)
+{
+	if (!userfaultfd_rwp(vma))
+		return false;
+
+	return !vma_is_anonymous(vma) && !is_vm_hugetlb_page(vma);
+}
+
+/*
  * Returns true if this swap pte carries uffd-tracked state in either
  * form (pte marker or a normal swap pte), false otherwise.
  */
@@ -327,6 +344,9 @@ static inline bool pte_swp_uffd_any(pte_t pte)
 		return true;
 
 	if (pte_is_uffd_wp_marker(pte))
+		return true;
+
+	if (pte_is_uffd_rwp_marker(pte))
 		return true;
 
 	return false;
@@ -482,6 +502,11 @@ static inline bool vma_has_uffd_without_event_remap(struct vm_area_struct *vma)
 }
 
 static inline bool userfaultfd_wp_use_markers(struct vm_area_struct *vma)
+{
+	return false;
+}
+
+static inline bool userfaultfd_rwp_use_markers(struct vm_area_struct *vma)
 {
 	return false;
 }

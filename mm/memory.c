@@ -1683,6 +1683,7 @@ bool cond_install_uffd_wp_ptes(struct vm_area_struct *vma,
 		unsigned long nr_ptes)
 {
 	bool arm_uffd_pte = false;
+	pte_t marker;
 
 	if (!uffd_supports_wp_marker())
 		return false;
@@ -1696,10 +1697,10 @@ bool cond_install_uffd_wp_ptes(struct vm_area_struct *vma,
 	 * page, or in TTU where the present pte will be quickly replaced
 	 * with a swap pte.  There's no way of leaking the bit.
 	 */
-	if (vma_is_anonymous(vma) || !userfaultfd_wp(vma))
+	if (vma_is_anonymous(vma) || !userfaultfd_protected(vma))
 		return false;
 
-	/* A uffd-wp wr-protected normal pte */
+	/* A uffd-wp wr-protected (or RWP-armed) normal pte */
 	if (unlikely(pte_present(pte) && pte_uffd(pte)))
 		arm_uffd_pte = true;
 
@@ -1713,9 +1714,11 @@ bool cond_install_uffd_wp_ptes(struct vm_area_struct *vma,
 	if (likely(!arm_uffd_pte))
 		return false;
 
+	/* VM_UFFD_WP and VM_UFFD_RWP are mutually exclusive on a VMA */
+	marker = make_pte_marker(userfaultfd_rwp(vma) ?
+				 PTE_MARKER_UFFD_RWP : PTE_MARKER_UFFD_WP);
 	for (;;) {
-		set_pte_at(vma->vm_mm, addr, ptep,
-			   make_pte_marker(PTE_MARKER_UFFD_WP));
+		set_pte_at(vma->vm_mm, addr, ptep, marker);
 		if (--nr_ptes == 0)
 			break;
 		ptep++;
@@ -1880,7 +1883,8 @@ static inline int zap_nonpresent_ptes(struct mmu_gather *tlb,
 		if (!should_zap_folio(details, folio))
 			return 1;
 		rss[mm_counter(folio)]--;
-	} else if (softleaf_is_uffd_wp_marker(entry)) {
+	} else if (softleaf_is_uffd_wp_marker(entry) ||
+		   softleaf_is_uffd_rwp_marker(entry)) {
 		/*
 		 * For anon: always drop the marker; for file: only
 		 * drop the marker if explicitly requested.
@@ -4696,6 +4700,23 @@ static vm_fault_t pte_marker_handle_uffd_wp(struct vm_fault *vmf)
 	return do_pte_missing(vmf);
 }
 
+/*
+ * A PTE_MARKER_UFFD_RWP means the PTE was RWP-armed when it was zapped.
+ * Report the access without populating anything: in sync mode the handler
+ * resolves it with UFFDIO_RWPROTECT (!MODE_RWP), which clears the marker
+ * (change_softleaf_pte()); in async mode we clear it ourselves and let the
+ * retry populate an unprotected PTE, which is how an access is recorded.
+ */
+static vm_fault_t pte_marker_handle_uffd_rwp(struct vm_fault *vmf)
+{
+	/* Leftover after unregistration, or async: drop it and retry */
+	if (unlikely(!userfaultfd_rwp(vmf->vma)) ||
+	    userfaultfd_rwp_async(vmf->vma))
+		return pte_marker_clear(vmf);
+
+	return handle_userfault(vmf, VM_UFFD_RWP);
+}
+
 static vm_fault_t handle_pte_marker(struct vm_fault *vmf)
 {
 	const softleaf_t entry = softleaf_from_pte(vmf->orig_pte);
@@ -4718,6 +4739,9 @@ static vm_fault_t handle_pte_marker(struct vm_fault *vmf)
 
 	if (softleaf_is_uffd_wp_marker(entry))
 		return pte_marker_handle_uffd_wp(vmf);
+
+	if (softleaf_is_uffd_rwp_marker(entry))
+		return pte_marker_handle_uffd_rwp(vmf);
 
 	/* This is an unknown pte marker */
 	return VM_FAULT_SIGBUS;

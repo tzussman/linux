@@ -375,25 +375,40 @@ wakes any faulting threads (unless ``UFFDIO_RWPROTECT_MODE_DONTWAKE`` is set).
 
 **Scope of protection:**
 
-RWP protection is a property of *present* PTEs. ``UFFDIO_RWPROTECT`` only
-affects entries that are already populated. Unpopulated addresses within
-the range remain unpopulated; when first accessed they fault through the
-normal missing path (``do_anonymous_page()``, ``do_swap_page()``,
-``finish_fault()``) and the resulting PTE is not RWP-protected. To observe
-the population itself, co-register the range with
-``UFFDIO_REGISTER_MODE_MISSING``.
+On anonymous memory RWP protection is a property of *present* PTEs.
+``UFFDIO_RWPROTECT`` only affects entries that are already populated.
+Unpopulated addresses within the range remain unpopulated; when first
+accessed they fault through the normal missing path
+(``do_anonymous_page()``, ``do_swap_page()``) and the resulting PTE is
+not RWP-protected. To observe the population itself, co-register the
+range with ``UFFDIO_REGISTER_MODE_MISSING``. On file-backed memory the
+page cache may already hold the data behind an unpopulated PTE, so
+``UFFDIO_RWPROTECT`` installs a ``PTE_MARKER_UFFD_RWP`` there (see below)
+and the first access is reported like any other.
 
-Protection is preserved across page reclaim: a page swapped out while
-RWP-protected carries the marker on its swap entry, and swap-in restores
-the PROT_NONE state so the first access after swap-in still faults. The
-same applies to pages temporarily replaced by migration entries.
+Protection is preserved across page reclaim: an anonymous page swapped
+out while RWP-protected carries the marker on its swap entry, and swap-in
+restores the PROT_NONE state so the first access after swap-in still
+faults. The same applies to pages temporarily replaced by migration
+entries.
 
-Operations that drop the PTE entirely — ``MADV_DONTNEED`` on anonymous
-memory, hole-punch on shmem, truncation of a file mapping — also drop the
-RWP marker: the next access re-populates the range without protection.
-Unlike WP (which persists via ``PTE_MARKER_UFFD_WP``), there is no
-persistent RWP marker today. The user needs to re-arm the range with
-``UFFDIO_RWPROTECT`` after any operation that explicitly frees PTEs.
+On file-backed memory (shmem, memfd, hugetlbfs excluded) a reclaimed page
+simply has its PTE cleared, and a PMD-mapped file THP is unmapped rather
+than split into PTEs by ``UFFDIO_RWPROTECT``. To keep the protection the
+kernel installs a persistent ``PTE_MARKER_UFFD_RWP`` in those cases, the
+RWP counterpart of ``PTE_MARKER_UFFD_WP``: the next access to the marker
+is reported as an RWP fault (sync mode), or clears the marker and
+re-populates the page from the page cache (async mode). The marker is
+removed by ``UFFDIO_RWPROTECT`` (clearing ``MODE_RWP``) and by
+``UFFDIO_UNREGISTER``; as with WP, it survives ``MADV_DONTNEED``,
+hole-punch and truncation of the mapping.
+
+Operations that drop the PTE entirely on *anonymous* memory
+(``MADV_DONTNEED``, ``MADV_FREE``) also drop the RWP marker: the next
+access re-populates the range without protection. There is no
+persistent RWP marker for anonymous memory (a zapped anonymous PTE means
+the page is gone), so re-arm the range with ``UFFDIO_RWPROTECT`` after
+any such operation. RWP on hugetlbfs likewise has no persistent marker.
 
 **Fault Handling:**
 

@@ -298,7 +298,14 @@ typedef unsigned long pte_marker;
  * PROT_NONE, rather than if they were a memory hole or equivalent.
  */
 #define  PTE_MARKER_GUARD			BIT(2)
-#define  PTE_MARKER_MASK			(BIT(3) - 1)
+/*
+ * Userfaultfd read-write protection (VM_UFFD_RWP) marker for file-backed
+ * memory: the PTE was RWP-armed when it was zapped (reclaim, THP split, ...),
+ * so the next access must still be reported.  RWP counterpart of
+ * PTE_MARKER_UFFD_WP.
+ */
+#define  PTE_MARKER_UFFD_RWP			BIT(3)
+#define  PTE_MARKER_MASK			(BIT(4) - 1)
 
 static inline swp_entry_t make_pte_marker_entry(pte_marker marker)
 {
