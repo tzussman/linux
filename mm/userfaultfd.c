@@ -621,6 +621,14 @@ static int mfill_atomic_pte_zeroed_folio(struct mfill_state *state)
 {
 	const struct vm_uffd_ops *ops = vma_uffd_ops(state->vma);
 
+	/*
+	 * Same as for UFFDIO_COPY above: a hole in a MAP_PRIVATE file mapping
+	 * is filled with anonymous memory, never by inserting a folio into
+	 * the file's page cache.
+	 */
+	if (!(state->vma->vm_flags & VM_SHARED))
+		ops = &anon_uffd_ops;
+
 	return __mfill_atomic_pte(state, ops);
 }
 
