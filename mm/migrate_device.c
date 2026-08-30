@@ -159,7 +159,16 @@ static int migrate_vma_collect_huge_pmd(pmd_t *pmdp, unsigned long start,
 
 		folio = pmd_folio(*pmdp);
 		if (is_huge_zero_folio(folio)) {
+			/*
+			 * A uffd-wp'd / RWP-armed huge zero PMD must not be
+			 * treated as a hole: replacing it would drop the
+			 * protection.
+			 */
+			bool uffd = pmd_uffd(*pmdp);
+
 			spin_unlock(ptl);
+			if (uffd)
+				return migrate_vma_collect_skip(start, end, walk);
 			return migrate_vma_collect_hole(start, end, -1, walk);
 		}
 		if (pmd_write(*pmdp))
@@ -337,6 +346,14 @@ again:
 			pfn = pte_pfn(pte);
 			if (is_zero_pfn(pfn) &&
 			    (migrate->flags & MIGRATE_VMA_SELECT_SYSTEM)) {
+				/*
+				 * A zero page PTE carries no struct page and
+				 * so no uffd state across the migration; if it
+				 * is uffd-wp'd / RWP-armed, leave it alone or
+				 * the protection would be lost.
+				 */
+				if (pte_uffd(pte))
+					goto next;
 				mpfn = MIGRATE_PFN_MIGRATE;
 				migrate->cpages++;
 				goto next;
@@ -869,10 +886,14 @@ static int migrate_vma_insert_huge_pmd_page(struct migrate_vma *migrate,
 	if (userfaultfd_missing(vma))
 		goto unlock_abort;
 
-	if (is_huge_zero_pmd(*pmdp))
+	if (is_huge_zero_pmd(*pmdp)) {
+		/* See migrate_vma_collect_pmd(): keep uffd-protected zero PMDs */
+		if (pmd_uffd(*pmdp))
+			goto unlock_abort;
 		flush = true;
-	else if (!pmd_none(*pmdp))
+	} else if (!pmd_none(*pmdp)) {
 		goto unlock_abort;
+	}
 
 	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_NR);
 	folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
@@ -1070,7 +1091,12 @@ static void migrate_vma_insert_page(struct migrate_vma *migrate,
 	if (pte_present(orig_pte)) {
 		unsigned long pfn = pte_pfn(orig_pte);
 
-		if (!is_zero_pfn(pfn))
+		/*
+		 * Only an unprotected zero page may be replaced: the new PTE
+		 * is built writable with no uffd state, which would silently
+		 * drop uffd-wp / RWP protection.
+		 */
+		if (!is_zero_pfn(pfn) || pte_uffd(orig_pte))
 			goto unlock_abort;
 		flush = true;
 	} else if (!pte_none(orig_pte))
