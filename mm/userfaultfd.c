@@ -65,11 +65,11 @@ static struct folio *anon_alloc_folio(struct vm_area_struct *vma,
 					      addr);
 
 	if (!folio)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	if (mem_cgroup_charge(folio, vma->vm_mm, GFP_KERNEL)) {
 		folio_put(folio);
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 	}
 
 	return folio;
@@ -547,8 +547,8 @@ static int __mfill_atomic_pte(struct mfill_state *state,
 	}
 
 	folio = ops->alloc_folio(state->vma, state->dst_addr);
-	if (!folio)
-		return -ENOMEM;
+	if (IS_ERR(folio))
+		return PTR_ERR(folio);
 
 	if (uffd_flags_mode_is(flags, MFILL_ATOMIC_COPY)) {
 		ret = mfill_copy_folio_locked(folio, src_addr);

@@ -97,7 +97,9 @@ struct vm_uffd_ops {
 	struct folio *(*get_folio_noalloc)(struct inode *inode, pgoff_t pgoff);
 	/*
 	 * Called during resolution of UFFDIO_COPY request.
-	 * Should allocate and return a folio or NULL if allocation fails.
+	 * Should allocate and return a folio, or an ERR_PTR() on failure
+	 * (e.g. -ENOMEM if allocation fails, -EFAULT if addr is beyond the
+	 * end of the file).
 	 */
 	struct folio *(*alloc_folio)(struct vm_area_struct *vma,
 				     unsigned long addr);

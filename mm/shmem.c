@@ -3348,15 +3348,15 @@ static struct folio *shmem_mfill_folio_alloc(struct vm_area_struct *vma,
 	struct folio *folio;
 
 	if (unlikely(pgoff >= DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE)))
-		return NULL;
+		return ERR_PTR(-EFAULT);
 
 	folio = shmem_alloc_folio(gfp, 0, info, pgoff);
 	if (!folio)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	if (mem_cgroup_charge(folio, vma->vm_mm, GFP_KERNEL)) {
 		folio_put(folio);
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 	}
 
 	return folio;
