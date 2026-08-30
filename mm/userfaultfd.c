@@ -2215,6 +2215,7 @@ static struct vm_area_struct *userfaultfd_clear_vma(struct vma_iterator *vmi,
 	struct vm_area_struct *ret;
 	bool give_up_on_oom = false;
 	vma_flags_t new_vma_flags = vma->flags;
+	unsigned int mm_cp_flags = 0;
 
 	vma_flags_clear_mask(&new_vma_flags, __VMA_UFFD_FLAGS);
 
@@ -2225,34 +2226,44 @@ static struct vm_area_struct *userfaultfd_clear_vma(struct vma_iterator *vmi,
 	if (start == vma->vm_start && end == vma->vm_end)
 		give_up_on_oom = true;
 
-	/* Clear the uffd bit and/or restore protnone PTEs */
-	if (userfaultfd_protected(vma)) {
-		unsigned int mm_cp_flags = 0;
-		struct mmu_gather tlb;
-
-		if (userfaultfd_wp(vma))
-			mm_cp_flags |= MM_CP_UFFD_WP_RESOLVE;
-		if (userfaultfd_rwp(vma))
-			mm_cp_flags |= MM_CP_UFFD_RWP_RESOLVE;
-		if (vma_wants_manual_pte_write_upgrade(vma))
-			mm_cp_flags |= MM_CP_TRY_CHANGE_WRITABLE;
-
-		tlb_gather_mmu(&tlb, vma->vm_mm);
-		change_protection(&tlb, vma, start, end, mm_cp_flags);
-		tlb_finish_mmu(&tlb);
-	}
+	/*
+	 * Decide what the page tables need before the vma flags are gone;
+	 * the actual change_protection() runs after the split/merge so that
+	 * a failed vma_modify_flags_uffd() (hugetlb split alignment, -ENOMEM)
+	 * leaves the still-registered vma with its protection intact.
+	 */
+	if (userfaultfd_wp(vma))
+		mm_cp_flags |= MM_CP_UFFD_WP_RESOLVE;
+	if (userfaultfd_rwp(vma))
+		mm_cp_flags |= MM_CP_UFFD_RWP_RESOLVE;
+	if (mm_cp_flags && vma_wants_manual_pte_write_upgrade(vma))
+		mm_cp_flags |= MM_CP_TRY_CHANGE_WRITABLE;
 
 	ret = vma_modify_flags_uffd(vmi, prev, vma, start, end,
 				    &new_vma_flags, NULL_VM_UFFD_CTX,
 				    give_up_on_oom);
+	if (IS_ERR(ret))
+		return ret;
 
 	/*
 	 * In the vma_merge() successful mprotect-like case 8:
 	 * the next vma was merged into the current one and
 	 * the current one has not been updated yet.
 	 */
-	if (!IS_ERR(ret))
-		userfaultfd_reset_ctx(ret);
+	userfaultfd_reset_ctx(ret);
+
+	/*
+	 * Clear the uffd bit and/or restore protnone PTEs.  The vma is
+	 * write-locked (and we hold mmap_lock for writing), so nothing can
+	 * fault on the transiently uffd-marked PTEs in between.
+	 */
+	if (mm_cp_flags) {
+		struct mmu_gather tlb;
+
+		tlb_gather_mmu(&tlb, ret->vm_mm);
+		change_protection(&tlb, ret, start, end, mm_cp_flags);
+		tlb_finish_mmu(&tlb);
+	}
 
 	return ret;
 }
