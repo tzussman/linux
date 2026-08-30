@@ -423,6 +423,12 @@ static int __uprobe_write(struct vm_area_struct *vma,
 			return -EFAULT;
 		if (unlikely(userfaultfd_pte_wp(vma, fw->pte)))
 			return -EFAULT;
+		/*
+		 * Likewise, an RWP-armed (protnone + uffd) PTE must be
+		 * resolved through a fault so that the access is reported.
+		 */
+		if (unlikely(userfaultfd_pte_rwp(vma, fw->pte)))
+			return -EFAULT;
 		/* SOFTDIRTY is handled via pte_mkdirty() below. */
 	}
 
