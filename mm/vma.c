@@ -1974,6 +1974,21 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 	if (vma->vm_file)
 		vmg.skip_vma_uprobe = true;
 
+	/*
+	 * If the VMA is registered on a userfaultfd context that does not
+	 * request UFFD_FEATURE_EVENT_REMAP, the moved range is going to be
+	 * unregistered by mremap_userfaultfd_prep() anyway.  Do not let the
+	 * merge template carry the uffd ctx and flags: otherwise the copied
+	 * range could merge into an adjacent VMA registered on the same ctx,
+	 * and the subsequent userfaultfd_reset_ctx() would clear tracking over
+	 * that neighbour's range too, silently unregistering memory that was
+	 * never part of the mremap().
+	 */
+	if (vma_has_uffd_without_event_remap(vma)) {
+		vmg.uffd_ctx = NULL_VM_UFFD_CTX;
+		vma_flags_clear_mask(&vmg.vma_flags, __VMA_UFFD_FLAGS);
+	}
+
 	new_vma = find_vma_prev(mm, addr, &vmg.prev);
 	if (new_vma && new_vma->vm_start < addr + len)
 		return NULL;	/* should never get here */
