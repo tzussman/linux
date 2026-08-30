@@ -2499,7 +2499,8 @@ static void make_uffd_wp_pmd(struct vm_area_struct *vma,
 		old = pmdp_invalidate_ad(vma, addr, pmdp);
 		pmd = pmd_mkuffd(old);
 		set_pmd_at(vma->vm_mm, addr, pmdp, pmd);
-	} else if (pmd_is_migration_entry(pmd)) {
+	} else if (pmd_is_migration_entry(pmd) ||
+		   pmd_is_device_private_entry(pmd)) {
 		pmd = pmd_swp_mkuffd(pmd);
 		set_pmd_at(vma->vm_mm, addr, pmdp, pmd);
 	}
@@ -2921,10 +2922,15 @@ static int pagemap_scan_hugetlb_entry(pte_t *ptep, unsigned long hmask,
 		goto out_unlock;
 
 	if (end != start + huge_page_size(hstate_vma(vma))) {
-		/* Partial HugeTLB page WP isn't possible. */
+		/*
+		 * Partial HugeTLB page WP isn't possible.  Back the page out
+		 * and stop here: if @end was trimmed by max_pages (ret is
+		 * -ENOSPC) the walk must not continue past this page, or a
+		 * later pagemap_scan_output() would advance walk_end beyond a
+		 * page that was neither reported nor write-protected.
+		 */
 		pagemap_scan_backout_range(p, start, end);
 		p->arg.walk_end = start;
-		ret = 0;
 		goto out_unlock;
 	}
 
@@ -3198,6 +3204,14 @@ static long do_pagemap_scan(struct mm_struct *mm, unsigned long uarg)
 			break;
 
 		if (p.arg.vec_len == 0 || p.found_pages == p.arg.max_pages)
+			break;
+
+		/*
+		 * No progress: the remaining max_pages budget is too small to
+		 * cover the HugeTLB page at walk_end (see
+		 * pagemap_scan_hugetlb_entry()).  Retrying would loop forever.
+		 */
+		if (p.arg.walk_end == walk_start)
 			break;
 	}
 
