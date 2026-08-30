@@ -688,9 +688,13 @@ static int mfill_atomic_pte_continue(struct mfill_state *state)
 	}
 
 	folio = ops->get_folio_noalloc(inode, pgoff);
-	/* Our caller expects us to return -EFAULT if we failed to find folio */
+	/*
+	 * Our caller expects us to return -EFAULT if we failed to find folio,
+	 * but let -EIO (poisoned swap entry) through so userspace can tell an
+	 * unresolvable page from a missing one.
+	 */
 	if (IS_ERR_OR_NULL(folio))
-		return -EFAULT;
+		return (IS_ERR(folio) && PTR_ERR(folio) == -EIO) ? -EIO : -EFAULT;
 
 	page = folio_file_page(folio, pgoff);
 	if (PageHWPoison(page)) {

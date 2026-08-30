@@ -2651,6 +2651,15 @@ repeat:
 	fault_mm = vma ? vma->vm_mm : NULL;
 
 	folio = filemap_get_entry(inode->i_mapping, index);
+	/*
+	 * A poisoned swap entry (swapin previously failed) can never be
+	 * resolved: don't report it as a MINOR fault, which userspace could
+	 * only answer with UFFDIO_CONTINUE that fails forever.  Fail the
+	 * access straight away, as we would without userfaultfd.
+	 */
+	if (xa_is_value(folio) &&
+	    softleaf_is_poison_marker(radix_to_swp_entry(folio)))
+		return -EIO;
 	if (folio && vma && userfaultfd_minor(vma)) {
 		if (!xa_is_value(folio))
 			folio_put(folio);
