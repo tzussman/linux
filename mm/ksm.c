@@ -40,6 +40,7 @@
 #include <linux/oom.h>
 #include <linux/numa.h>
 #include <linux/pagewalk.h>
+#include <linux/userfaultfd_k.h>
 
 #include <asm/tlbflush.h>
 #include "internal.h"
@@ -1460,6 +1461,18 @@ static int replace_page(struct vm_area_struct *vma, struct page *page,
 		 * when tearing down the mm.
 		 */
 		dec_mm_counter(mm, MM_ANONPAGES);
+	}
+
+	/*
+	 * Preserve userfaultfd protection across the replacement: the
+	 * uffd bit (and PAGE_NONE for RWP) live in the PTE, and the new PTE
+	 * is built from scratch above.  Without this the next write (WP) or
+	 * access (RWP) to the KSM page would not be reported to userspace.
+	 */
+	if (userfaultfd_protected(vma) && pte_uffd(orig_pte)) {
+		newpte = pte_mkuffd(newpte);
+		if (userfaultfd_rwp(vma))
+			newpte = pte_modify(newpte, PAGE_NONE);
 	}
 
 	flush_cache_page(vma, addr, pte_pfn(ptep_get(ptep)));
