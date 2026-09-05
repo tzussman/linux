@@ -145,7 +145,7 @@ struct folio *f2fs_compress_control_folio(struct folio *folio)
 {
 	struct compress_io_ctx *ctx = folio->private;
 
-	return page_folio(ctx->rpages[0]);
+	return ctx->rfolios[0];
 }
 
 int f2fs_init_compress_ctx(struct compress_ctx *cc)
@@ -904,7 +904,7 @@ static bool f2fs_cluster_is_full(struct compress_ctx *cc)
 
 	/* PG_dirty is cleared for writeback; without ffs it covered every block */
 	for (i = 0; i < nr_folios; i++) {
-		struct folio *folio = page_folio(cc->rpages[i]);
+		struct folio *folio = cc->rfolios[i];
 		unsigned int nr_blocks = f2fs_blocks_per_folio(sbi, folio);
 		unsigned int start, count;
 
