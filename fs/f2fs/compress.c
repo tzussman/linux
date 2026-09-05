@@ -2078,20 +2078,20 @@ void f2fs_decompress_end_io(struct decompress_io_ctx *dic, bool failed,
 
 	/* Update and unlock the cluster's pagecache pages. */
 	for (i = 0; i < dic->nr_rpages; i++) {
-		struct page *rpage = dic->rpages[i];
+		struct folio *rfolio = dic->rfolios[i];
 
-		if (!rpage)
+		if (!rfolio)
 			continue;
 
 		if (failed) {
-			ClearPageUptodate(rpage);
+			folio_clear_uptodate(rfolio);
 		} else {
-			if (f2fs_is_multiblock_folio(dic->sbi, page_folio(rpage)))
-				f2fs_ffs_mark_subrange_uptodate(page_folio(rpage), 0,
-								folio_size(page_folio(rpage)));
-			SetPageUptodate(rpage);
+			if (f2fs_is_multiblock_folio(dic->sbi, rfolio))
+				f2fs_ffs_mark_subrange_uptodate(rfolio, 0,
+							folio_size(rfolio));
+			folio_mark_uptodate(rfolio);
 		}
-		unlock_page(rpage);
+		folio_unlock(rfolio);
 	}
 
 	/*
