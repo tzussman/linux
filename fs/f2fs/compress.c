@@ -1641,8 +1641,8 @@ static int f2fs_prepare_decomp_mem(struct decompress_io_ctx *dic,
 		return -ENOMEM;
 
 	for (i = 0; i < dic->cluster_size; i++) {
-		if (dic->rpages[i]) {
-			dic->tpages[i] = dic->rpages[i];
+		if (dic->rfolios[i]) {
+			dic->tpages[i] = folio_page(dic->rfolios[i], 0);
 			continue;
 		}
 
@@ -1715,7 +1715,7 @@ struct decompress_io_ctx *f2fs_alloc_dic(struct compress_ctx *cc)
 	dic->vi = cc->vi;
 
 	for (i = 0; i < dic->cluster_size; i++)
-		dic->rpages[i] = cc->rpages[i];
+		dic->rfolios[i] = cc->rfolios[i];
 	dic->nr_rpages = cc->cluster_size;
 
 	dic->cpages = page_array_alloc(sbi, dic->nr_cpages);
@@ -1755,7 +1755,7 @@ static void f2fs_free_dic(struct decompress_io_ctx *dic,
 
 	if (dic->tpages) {
 		for (i = 0; i < dic->cluster_size; i++) {
-			if (dic->rpages[i])
+			if (dic->rfolios[i])
 				continue;
 			if (!dic->tpages[i])
 				continue;
@@ -1805,12 +1805,10 @@ static void f2fs_verify_cluster(struct work_struct *work)
 
 	/* Verify, update, and unlock the decompressed pages. */
 	for (i = 0; i < dic->cluster_size; i++) {
-		struct page *rpage = dic->rpages[i];
-		struct folio *rfolio;
+		struct folio *rfolio = dic->rfolios[i];
 
-		if (!rpage)
+		if (!rfolio)
 			continue;
-		rfolio = page_folio(rpage);
 		if (fsverity_verify_folio(dic->vi, rfolio))
 			folio_mark_uptodate(rfolio);
 		folio_unlock(rfolio);
@@ -1842,16 +1840,16 @@ void f2fs_decompress_end_io(struct decompress_io_ctx *dic, bool failed,
 
 	/* Update and unlock the cluster's pagecache pages. */
 	for (i = 0; i < dic->cluster_size; i++) {
-		struct page *rpage = dic->rpages[i];
+		struct folio *rfolio = dic->rfolios[i];
 
-		if (!rpage)
+		if (!rfolio)
 			continue;
 
 		if (failed)
-			ClearPageUptodate(rpage);
+			folio_clear_uptodate(rfolio);
 		else
-			SetPageUptodate(rpage);
-		unlock_page(rpage);
+			folio_mark_uptodate(rfolio);
+		folio_unlock(rfolio);
 	}
 
 	/*
