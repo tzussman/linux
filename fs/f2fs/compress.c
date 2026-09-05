@@ -1587,7 +1587,7 @@ out:
 	return ret;
 }
 
-int f2fs_write_multi_pages(struct compress_ctx *cc,
+int f2fs_write_multi_folios(struct compress_ctx *cc,
 					int *submitted,
 					struct writeback_control *wbc,
 					enum iostat_type io_type)

@@ -4729,7 +4729,7 @@ bool f2fs_all_cluster_folio_ready(struct compress_ctx *cc, struct folio **folios
 				int index, int nr_folios, bool uptodate);
 bool f2fs_sanity_check_cluster(struct dnode_of_data *dn);
 void f2fs_compress_ctx_add_folio(struct compress_ctx *cc, struct folio *folio);
-int f2fs_write_multi_pages(struct compress_ctx *cc,
+int f2fs_write_multi_folios(struct compress_ctx *cc,
 						int *submitted,
 						struct writeback_control *wbc,
 						enum iostat_type io_type);

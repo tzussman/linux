@@ -3345,7 +3345,7 @@ readd:
 
 				if (!f2fs_cluster_can_merge_page(&cc,
 								folio->index)) {
-					ret = f2fs_write_multi_pages(&cc,
+					ret = f2fs_write_multi_folios(&cc,
 						&submitted, wbc, io_type);
 					if (!ret)
 						need_readd = true;
@@ -3467,7 +3467,7 @@ next:
 #ifdef CONFIG_F2FS_FS_COMPRESSION
 	/* flush remained pages in compress cluster */
 	if (f2fs_compressed_file(inode) && !f2fs_cluster_is_empty(&cc)) {
-		ret = f2fs_write_multi_pages(&cc, &submitted, wbc, io_type);
+		ret = f2fs_write_multi_folios(&cc, &submitted, wbc, io_type);
 		nwritten += submitted;
 		wbc->nr_to_write -= submitted;
 		if (ret) {
