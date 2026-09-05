@@ -1499,7 +1499,7 @@ void f2fs_compress_write_end_io(struct bio *bio, struct folio *folio)
 	dec_page_count(sbi, type);
 }
 
-static int f2fs_write_raw_pages(struct compress_ctx *cc,
+static int f2fs_write_raw_folios(struct compress_ctx *cc,
 					int *submitted_p,
 					struct writeback_control *wbc,
 					enum iostat_type io_type)
@@ -1513,11 +1513,11 @@ static int f2fs_write_raw_pages(struct compress_ctx *cc,
 	compr_blocks = f2fs_compressed_blocks(cc);
 
 	for (i = 0; i < cc->cluster_size; i++) {
-		if (!cc->rpages[i])
+		if (!cc->rfolios[i])
 			continue;
 
-		redirty_page_for_writepage(wbc, cc->rpages[i]);
-		unlock_page(cc->rpages[i]);
+		folio_redirty_for_writepage(wbc, cc->rfolios[i]);
+		folio_unlock(cc->rfolios[i]);
 	}
 
 	if (compr_blocks < 0)
@@ -1530,9 +1530,9 @@ static int f2fs_write_raw_pages(struct compress_ctx *cc,
 	for (i = 0; i < cc->cluster_size; i++) {
 		struct folio *folio;
 
-		if (!cc->rpages[i])
+		if (!cc->rfolios[i])
 			continue;
-		folio = page_folio(cc->rpages[i]);
+		folio = cc->rfolios[i];
 retry_write:
 		folio_lock(folio);
 
@@ -1614,7 +1614,7 @@ int f2fs_write_multi_pages(struct compress_ctx *cc,
 write:
 	f2fs_bug_on(F2FS_I_SB(cc->inode), *submitted);
 
-	err = f2fs_write_raw_pages(cc, submitted, wbc, io_type);
+	err = f2fs_write_raw_folios(cc, submitted, wbc, io_type);
 	f2fs_put_rfolios_wbc(cc, wbc, false, false);
 destroy_out:
 	f2fs_destroy_compress_ctx(cc, false);
