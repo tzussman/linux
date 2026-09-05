@@ -2312,7 +2312,7 @@ out:
 }
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
-int f2fs_read_multi_pages(struct compress_ctx *cc, struct bio **bio_ret,
+int f2fs_read_multi_folios(struct compress_ctx *cc, struct bio **bio_ret,
 				unsigned nr_pages, sector_t *last_block_in_bio,
 				struct readahead_control *rac, bool for_write)
 {
@@ -2342,13 +2342,11 @@ int f2fs_read_multi_pages(struct compress_ctx *cc, struct bio **bio_ret,
 
 	/* get rid of pages beyond EOF */
 	for (i = 0; i < cc->cluster_size; i++) {
-		struct page *page = cc->rpages[i];
-		struct folio *folio;
+		struct folio *folio = cc->rfolios[i];
 
-		if (!page)
+		if (!folio)
 			continue;
 
-		folio = page_folio(page);
 		if ((sector_t)folio->index >= last_block_in_file) {
 			folio_zero_segment(folio, 0, folio_size(folio));
 			if (!folio_test_uptodate(folio))
@@ -2359,7 +2357,7 @@ int f2fs_read_multi_pages(struct compress_ctx *cc, struct bio **bio_ret,
 		folio_unlock(folio);
 		if (for_write)
 			folio_put(folio);
-		cc->rpages[i] = NULL;
+		cc->rfolios[i] = NULL;
 		cc->nr_rpages--;
 	}
 
@@ -2469,9 +2467,9 @@ out_put_dnode:
 		f2fs_put_dnode(&dn);
 out:
 	for (i = 0; i < cc->cluster_size; i++) {
-		if (cc->rpages[i]) {
-			ClearPageUptodate(cc->rpages[i]);
-			unlock_page(cc->rpages[i]);
+		if (cc->rfolios[i]) {
+			folio_clear_uptodate(cc->rfolios[i]);
+			folio_unlock(cc->rfolios[i]);
 		}
 	}
 	*bio_ret = bio;
@@ -2726,7 +2724,7 @@ static int f2fs_mpage_readpages(struct inode *inode, struct fsverity_info *vi,
 		/* there are remained compressed pages, submit them */
 		if (!f2fs_cluster_can_merge_page(&cc, index)) {
 			cc.vi = vi;
-			ret = f2fs_read_multi_pages(&cc, &bio,
+			ret = f2fs_read_multi_folios(&cc, &bio,
 						max_nr_pages,
 						&last_block_in_bio,
 						rac, false);
@@ -2778,7 +2776,7 @@ next_page:
 			/* last page */
 			if (nr_pages == 1 && !f2fs_cluster_is_empty(&cc)) {
 				cc.vi = vi;
-				ret = f2fs_read_multi_pages(&cc, &bio,
+				ret = f2fs_read_multi_folios(&cc, &bio,
 							max_nr_pages,
 							&last_block_in_bio,
 							rac, false);

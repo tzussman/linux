@@ -1127,7 +1127,7 @@ retry:
 	if (!f2fs_cluster_is_empty(cc)) {
 		struct bio *bio = NULL;
 
-		ret = f2fs_read_multi_pages(cc, &bio, cc->cluster_size,
+		ret = f2fs_read_multi_folios(cc, &bio, cc->cluster_size,
 					&last_block_in_bio, NULL, true);
 		f2fs_put_rfolios(cc);
 		f2fs_destroy_compress_ctx(cc, true);
