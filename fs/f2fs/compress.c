@@ -168,7 +168,7 @@ void f2fs_destroy_compress_ctx(struct compress_ctx *cc, bool reuse)
 		cc->cluster_idx = NULL_CLUSTER;
 }
 
-void f2fs_compress_ctx_add_page(struct compress_ctx *cc, struct folio *folio)
+void f2fs_compress_ctx_add_folio(struct compress_ctx *cc, struct folio *folio)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(cc->inode);
 	unsigned int cluster_ofs;
@@ -178,7 +178,7 @@ void f2fs_compress_ctx_add_page(struct compress_ctx *cc, struct folio *folio)
 		f2fs_bug_on(sbi, 1);
 
 	cluster_ofs = offset_in_cluster(cc, lblk);
-	cc->rpages[cluster_ofs] = folio_page(folio, 0);
+	cc->rfolios[cluster_ofs] = folio;
 	cc->nr_rpages++;
 	cc->cluster_idx = cluster_idx(cc, lblk);
 }
@@ -1250,7 +1250,7 @@ retry:
 		if (folio_test_uptodate(folio))
 			f2fs_folio_put(folio, true);
 		else
-			f2fs_compress_ctx_add_page(cc, folio);
+			f2fs_compress_ctx_add_folio(cc, folio);
 	}
 
 	if (!f2fs_cluster_is_empty(cc)) {
@@ -1282,7 +1282,7 @@ retry:
 		}
 
 		f2fs_folio_wait_writeback(folio, true, true);
-		f2fs_compress_ctx_add_page(cc, folio);
+		f2fs_compress_ctx_add_folio(cc, folio);
 
 		if (!folio_test_uptodate(folio)) {
 			f2fs_handle_page_eio(sbi, folio->index, DATA);
