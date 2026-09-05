@@ -138,7 +138,7 @@ struct folio *f2fs_compress_control_folio(struct folio *folio)
 {
 	struct compress_io_ctx *ctx = folio->private;
 
-	return page_folio(ctx->rpages[0]);
+	return ctx->rfolios[0];
 }
 
 int f2fs_init_compress_ctx(struct compress_ctx *cc)
@@ -878,12 +878,12 @@ static bool cluster_has_invalid_data(struct compress_ctx *cc)
 	int i;
 
 	for (i = 0; i < cc->cluster_size; i++) {
-		struct page *page = cc->rpages[i];
+		struct folio *folio = cc->rfolios[i];
 
-		f2fs_bug_on(F2FS_I_SB(cc->inode), !page);
+		f2fs_bug_on(F2FS_I_SB(cc->inode), !folio);
 
 		/* beyond EOF */
-		if (page_folio(page)->index >= nr_pages)
+		if (folio->index >= nr_pages)
 			return true;
 	}
 	return false;
@@ -1044,8 +1044,8 @@ static void set_cluster_writeback(struct compress_ctx *cc)
 	int i;
 
 	for (i = 0; i < cc->cluster_size; i++) {
-		if (cc->rpages[i])
-			set_page_writeback(cc->rpages[i]);
+		if (cc->rfolios[i])
+			folio_start_writeback(cc->rfolios[i]);
 	}
 }
 
