@@ -84,11 +84,9 @@ bool f2fs_is_compressed_page(struct folio *folio)
 	return true;
 }
 
-static void f2fs_set_compressed_page(struct page *page,
+static void f2fs_set_compressed_folio(struct folio *folio,
 		struct inode *inode, pgoff_t index, void *data)
 {
-	struct folio *folio = page_folio(page);
-
 	folio_attach_private(folio, (void *)data);
 
 	/* i_crypto_info and iv index */
@@ -1379,9 +1377,9 @@ static int f2fs_write_compressed_pages(struct compress_ctx *cc,
 	cic->nr_rfolios = cc->cluster_size;
 
 	for (i = 0; i < cc->valid_nr_cpages; i++) {
-		f2fs_set_compressed_page(cc->cpages[i], inode,
+		f2fs_set_compressed_folio(cc->cfolios[i], inode,
 				cc->rfolios[i + 1]->index, cic);
-		fio.compressed_folio = page_folio(cc->cpages[i]);
+		fio.compressed_folio = cc->cfolios[i];
 
 		fio.old_blkaddr = data_blkaddr(dn.inode, dn.node_folio,
 						dn.ofs_in_node + i + 1);
@@ -1425,9 +1423,9 @@ static int f2fs_write_compressed_pages(struct compress_ctx *cc,
 
 		f2fs_bug_on(fio.sbi, blkaddr == NULL_ADDR);
 
-		fio.compressed_folio = page_folio(cc->cpages[i - 1]);
+		fio.compressed_folio = cc->cfolios[i - 1];
 
-		cc->cpages[i - 1] = NULL;
+		cc->cfolios[i - 1] = NULL;
 		fio.submitted = 0;
 		f2fs_outplace_write_data(&dn, &fio);
 		if (unlikely(!fio.submitted)) {
@@ -1460,8 +1458,8 @@ unlock_continue:
 	spin_unlock(&fi->i_size_lock);
 
 	f2fs_put_rfolios(cc);
-	page_array_free(sbi, cc->cpages, cc->nr_cpages);
-	cc->cpages = NULL;
+	page_array_free(sbi, cc->cfolios, cc->nr_cpages);
+	cc->cfolios = NULL;
 	f2fs_destroy_compress_ctx(cc, false);
 	return 0;
 
@@ -1478,17 +1476,16 @@ out_unlock_op:
 		f2fs_unlock_op(sbi, &lc);
 out_free:
 	for (i = 0; i < cc->valid_nr_cpages; i++) {
-		f2fs_compress_free_page(cc->cpages[i]);
-		cc->cpages[i] = NULL;
+		f2fs_compress_free_folio(cc->cfolios[i]);
+		cc->cfolios[i] = NULL;
 	}
-	page_array_free(sbi, cc->cpages, cc->nr_cpages);
-	cc->cpages = NULL;
+	page_array_free(sbi, cc->cfolios, cc->nr_cpages);
+	cc->cfolios = NULL;
 	return -EAGAIN;
 }
 
 void f2fs_compress_write_end_io(struct bio *bio, struct folio *folio)
 {
-	struct page *page = &folio->page;
 	struct f2fs_sb_info *sbi = bio->bi_private;
 	struct compress_io_ctx *cic = folio->private;
 	enum count_type type = WB_DATA_TYPE(folio, true);
@@ -1497,7 +1494,7 @@ void f2fs_compress_write_end_io(struct bio *bio, struct folio *folio)
 	if (unlikely(bio->bi_status != BLK_STS_OK))
 		mapping_set_error(cic->inode->i_mapping, -EIO);
 
-	f2fs_compress_free_page(page);
+	f2fs_compress_free_folio(folio);
 
 	if (atomic_dec_return(&cic->pending_pages)) {
 		dec_page_count(sbi, type);
@@ -1753,8 +1750,8 @@ struct decompress_io_ctx *f2fs_alloc_dic(struct compress_ctx *cc)
 		struct page *page;
 
 		page = f2fs_compress_alloc_page();
-		f2fs_set_compressed_page(page, cc->inode,
-					start_idx + i + 1, dic);
+		f2fs_set_compressed_folio(page_folio(page), cc->inode,
+					  start_idx + i + 1, dic);
 		dic->cpages[i] = page;
 	}
 
