@@ -1674,14 +1674,11 @@ struct compress_ctx {
 	unsigned int log_cluster_size;	/* log of cluster size */
 	struct folio **rfolios;		/* folios store raw data in cluster */
 	unsigned int nr_rfolios;		/* total folio number in rfolios */
-	union {
-		struct page **cpages;	/* pages store compressed data in cluster */
-		struct folio **cfolios;
-	};
-	unsigned int nr_cpages;		/* total page number in cpages */
-	unsigned int valid_nr_cpages;	/* valid page number in cpages */
+	struct folio **cfolios;		/* folios store compressed data in cluster */
+	unsigned int nr_cfolios;	/* total folio number in cfolios */
+	unsigned int valid_nr_cfolios;	/* valid folio number in cfolios */
 	void *rbuf;			/* virtual mapped address on rfolios */
-	struct compress_data *cbuf;	/* virtual mapped address on cpages */
+	struct compress_data *cbuf;	/* virtual mapped address on cfolios */
 	size_t rlen;			/* valid data length in rbuf */
 	size_t clen;			/* valid data length in cbuf */
 	void *private;			/* payload buffer for specified compression algorithm */
@@ -1708,23 +1705,17 @@ struct decompress_io_ctx {
 	unsigned int log_cluster_size;	/* log of cluster size */
 	struct folio **rfolios;		/* folios store raw data in cluster */
 	unsigned int nr_rfolios;		/* total folio number in rfolios */
-	union {
-		struct page **cpages;	/* pages store compressed data in cluster */
-		struct folio **cfolios;
-	};
-	unsigned int nr_cpages;		/* total page number in cpages */
-	union {
-		struct page **tpages;	/* temp pages to pad holes in cluster */
-		struct folio **tfolios;
-	};
+	struct folio **cfolios;		/* folios store compressed data in cluster */
+	unsigned int nr_cfolios;	/* total folio number in cfolios */
+	struct folio **tfolios;		/* temp folios to pad holes in cluster */
 	void *rbuf;			/* virtual mapped address on rfolios */
-	struct compress_data *cbuf;	/* virtual mapped address on cpages */
+	struct compress_data *cbuf;	/* virtual mapped address on cfolios */
 	size_t rlen;			/* valid data length in rbuf */
 	size_t clen;			/* valid data length in cbuf */
 
 	/*
 	 * The number of compressed pages remaining to be read in this cluster.
-	 * This is initially nr_cpages.  It is decremented by 1 each time a page
+	 * This is initially nr_cfolios.  It is decremented by 1 each time a page
 	 * has been read (or failed to be read).  When it reaches 0, the cluster
 	 * is decompressed (or an error is reported).
 	 *

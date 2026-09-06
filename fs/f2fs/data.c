@@ -2393,14 +2393,14 @@ skip_reading_dnode:
 			ret = -EFAULT;
 			goto out_put_dnode;
 		}
-		cc->nr_cpages++;
+		cc->nr_cfolios++;
 
 		if (!from_dnode && i >= ei.c_len)
 			break;
 	}
 
 	/* nothing to decompress */
-	if (cc->nr_cpages == 0) {
+	if (cc->nr_cfolios == 0) {
 		ret = 0;
 		goto out_put_dnode;
 	}
@@ -2411,7 +2411,7 @@ skip_reading_dnode:
 		goto out_put_dnode;
 	}
 
-	for (i = 0; i < cc->nr_cpages; i++) {
+	for (i = 0; i < cc->nr_cfolios; i++) {
 		struct folio *folio = dic->cfolios[i];
 		block_t blkaddr;
 		struct bio_post_read_ctx *ctx;
@@ -2674,9 +2674,9 @@ static int f2fs_mpage_readpages(struct inode *inode, struct fsverity_info *vi,
 		.cluster_size = F2FS_I(inode)->i_cluster_size,
 		.cluster_idx = NULL_CLUSTER,
 		.rfolios = NULL,
-		.cpages = NULL,
+		.cfolios = NULL,
 		.nr_rfolios = 0,
-		.nr_cpages = 0,
+		.nr_cfolios = 0,
 	};
 	pgoff_t nc_cluster_idx = NULL_CLUSTER;
 	pgoff_t index;
@@ -3242,8 +3242,8 @@ static int f2fs_write_cache_pages(struct address_space *mapping,
 		.cluster_idx = NULL_CLUSTER,
 		.rfolios = NULL,
 		.nr_rfolios = 0,
-		.cpages = NULL,
-		.valid_nr_cpages = 0,
+		.cfolios = NULL,
+		.valid_nr_cfolios = 0,
 		.rbuf = NULL,
 		.cbuf = NULL,
 		.rlen = PAGE_SIZE * F2FS_I(inode)->i_cluster_size,
