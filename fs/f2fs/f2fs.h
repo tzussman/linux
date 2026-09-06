@@ -1674,7 +1674,10 @@ struct compress_ctx {
 	unsigned int log_cluster_size;	/* log of cluster size */
 	struct folio **rfolios;		/* folios store raw data in cluster */
 	unsigned int nr_rfolios;		/* total folio number in rfolios */
-	struct page **cpages;		/* pages store compressed data in cluster */
+	union {
+		struct page **cpages;	/* pages store compressed data in cluster */
+		struct folio **cfolios;
+	};
 	unsigned int nr_cpages;		/* total page number in cpages */
 	unsigned int valid_nr_cpages;	/* valid page number in cpages */
 	void *rbuf;			/* virtual mapped address on rfolios */
@@ -1705,9 +1708,15 @@ struct decompress_io_ctx {
 	unsigned int log_cluster_size;	/* log of cluster size */
 	struct folio **rfolios;		/* folios store raw data in cluster */
 	unsigned int nr_rfolios;		/* total folio number in rfolios */
-	struct page **cpages;		/* pages store compressed data in cluster */
+	union {
+		struct page **cpages;	/* pages store compressed data in cluster */
+		struct folio **cfolios;
+	};
 	unsigned int nr_cpages;		/* total page number in cpages */
-	struct page **tpages;		/* temp pages to pad holes in cluster */
+	union {
+		struct page **tpages;	/* temp pages to pad holes in cluster */
+		struct folio **tfolios;
+	};
 	void *rbuf;			/* virtual mapped address on rfolios */
 	struct compress_data *cbuf;	/* virtual mapped address on cpages */
 	size_t rlen;			/* valid data length in rbuf */
