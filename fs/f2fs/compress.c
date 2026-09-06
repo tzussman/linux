@@ -1658,24 +1658,24 @@ static int f2fs_prepare_decomp_mem(struct decompress_io_ctx *dic,
 	if (!allow_memalloc_for_decomp(dic->sbi, pre_alloc))
 		return 0;
 
-	dic->tpages = page_array_alloc(dic->sbi, dic->cluster_size);
-	if (!dic->tpages)
+	dic->tfolios = page_array_alloc(dic->sbi, dic->cluster_size);
+	if (!dic->tfolios)
 		return -ENOMEM;
 
 	for (i = 0; i < dic->cluster_size; i++) {
 		if (dic->rfolios[i]) {
-			dic->tpages[i] = folio_page(dic->rfolios[i], 0);
+			dic->tfolios[i] = dic->rfolios[i];
 			continue;
 		}
 
-		dic->tpages[i] = f2fs_compress_alloc_page();
+		dic->tfolios[i] = f2fs_compress_alloc_folio();
 	}
 
-	dic->rbuf = f2fs_vmap(dic->tpages, dic->cluster_size);
+	dic->rbuf = f2fs_vmap_folios(dic->tfolios, dic->cluster_size);
 	if (!dic->rbuf)
 		return -ENOMEM;
 
-	dic->cbuf = f2fs_vmap(dic->cpages, dic->nr_cpages);
+	dic->cbuf = f2fs_vmap_folios(dic->cfolios, dic->nr_cpages);
 	if (!dic->cbuf)
 		return -ENOMEM;
 
@@ -1740,19 +1740,18 @@ struct decompress_io_ctx *f2fs_alloc_dic(struct compress_ctx *cc)
 		dic->rfolios[i] = cc->rfolios[i];
 	dic->nr_rfolios = cc->cluster_size;
 
-	dic->cpages = page_array_alloc(sbi, dic->nr_cpages);
-	if (!dic->cpages) {
+	dic->cfolios = page_array_alloc(sbi, dic->nr_cpages);
+	if (!dic->cfolios) {
 		ret = -ENOMEM;
 		goto out_free;
 	}
 
 	for (i = 0; i < dic->nr_cpages; i++) {
-		struct page *page;
+		struct folio *folio;
 
-		page = f2fs_compress_alloc_page();
-		f2fs_set_compressed_folio(page_folio(page), cc->inode,
-					  start_idx + i + 1, dic);
-		dic->cpages[i] = page;
+		folio = f2fs_compress_alloc_folio();
+		f2fs_set_compressed_folio(folio, cc->inode, start_idx + i + 1, dic);
+		dic->cfolios[i] = folio;
 	}
 
 	ret = f2fs_prepare_decomp_mem(dic, true);
@@ -1775,24 +1774,24 @@ static void f2fs_free_dic(struct decompress_io_ctx *dic,
 
 	f2fs_release_decomp_mem(dic, bypass_destroy_callback, true);
 
-	if (dic->tpages) {
+	if (dic->tfolios) {
 		for (i = 0; i < dic->cluster_size; i++) {
 			if (dic->rfolios[i])
 				continue;
-			if (!dic->tpages[i])
+			if (!dic->tfolios[i])
 				continue;
-			f2fs_compress_free_page(dic->tpages[i]);
+			f2fs_compress_free_folio(dic->tfolios[i]);
 		}
-		page_array_free(sbi, dic->tpages, dic->cluster_size);
+		page_array_free(sbi, dic->tfolios, dic->cluster_size);
 	}
 
-	if (dic->cpages) {
+	if (dic->cfolios) {
 		for (i = 0; i < dic->nr_cpages; i++) {
-			if (!dic->cpages[i])
+			if (!dic->cfolios[i])
 				continue;
-			f2fs_compress_free_page(dic->cpages[i]);
+			f2fs_compress_free_folio(dic->cfolios[i]);
 		}
-		page_array_free(sbi, dic->cpages, dic->nr_cpages);
+		page_array_free(sbi, dic->cfolios, dic->nr_cpages);
 	}
 
 	page_array_free(sbi, dic->rfolios, dic->nr_rfolios);

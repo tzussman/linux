@@ -2412,7 +2412,7 @@ skip_reading_dnode:
 	}
 
 	for (i = 0; i < cc->nr_cpages; i++) {
-		struct folio *folio = page_folio(dic->cpages[i]);
+		struct folio *folio = dic->cfolios[i];
 		block_t blkaddr;
 		struct bio_post_read_ctx *ctx;
 
