@@ -578,27 +578,35 @@ void f2fs_destroy_compress_mempool(void)
 	mempool_destroy(compress_page_pool);
 }
 
+static struct folio *f2fs_compress_alloc_folio(void)
+{
+	struct page *page = mempool_alloc(compress_page_pool, GFP_NOFS);
+	struct folio *folio = page_folio(page);
+
+	folio_lock(folio);
+
+	return folio;
+}
+
 static struct page *f2fs_compress_alloc_page(void)
 {
-	struct page *page;
+	return &f2fs_compress_alloc_folio()->page;
+}
 
-	page = mempool_alloc(compress_page_pool, GFP_NOFS);
-	lock_page(page);
-
-	return page;
+static void f2fs_compress_free_folio(struct folio *folio)
+{
+	if (!folio)
+		return;
+	folio_detach_private(folio);
+	folio->mapping = NULL;
+	folio_unlock(folio);
+	mempool_free(&folio->page, compress_page_pool);
 }
 
 static void f2fs_compress_free_page(struct page *page)
 {
-	struct folio *folio;
-
-	if (!page)
-		return;
-	folio = page_folio(page);
-	folio_detach_private(folio);
-	folio->mapping = NULL;
-	folio_unlock(folio);
-	mempool_free(page, compress_page_pool);
+	if (page)
+		f2fs_compress_free_folio(page_folio(page));
 }
 
 #define MAX_VMAP_RETRIES	3
