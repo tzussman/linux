@@ -11,7 +11,7 @@
 
 #include <linux/kernel.h>
 #include <linux/highmem.h>
-#include <linux/pagemap.h>	/* read_mapping_page */
+#include <linux/pagemap.h>	/* read_mapping_folio */
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/sched/mm.h>
@@ -1051,21 +1051,21 @@ static void consumer_del(struct uprobe *uprobe, struct uprobe_consumer *uc)
 static int __copy_insn(struct address_space *mapping, struct file *filp,
 			void *insn, int nbytes, loff_t offset)
 {
-	struct page *page;
+	struct folio *folio;
 	/*
-	 * Ensure that the page that has the original instruction is populated
+	 * Ensure that the folio that has the original instruction is populated
 	 * and in page-cache. If ->read_folio == NULL it must be shmem_mapping(),
 	 * see uprobe_register().
 	 */
 	if (mapping->a_ops->read_folio)
-		page = read_mapping_page(mapping, offset >> PAGE_SHIFT, filp);
+		folio = read_mapping_folio(mapping, offset >> PAGE_SHIFT, filp);
 	else
-		page = shmem_read_mapping_page(mapping, offset >> PAGE_SHIFT);
-	if (IS_ERR(page))
-		return PTR_ERR(page);
+		folio = shmem_read_folio(mapping, offset >> PAGE_SHIFT);
+	if (IS_ERR(folio))
+		return PTR_ERR(folio);
 
-	uprobe_copy_from_page(page, offset, insn, nbytes);
-	put_page(page);
+	memcpy_from_folio(insn, folio, offset_in_folio(folio, offset), nbytes);
+	folio_put(folio);
 
 	return 0;
 }
@@ -1401,7 +1401,7 @@ struct uprobe *uprobe_register(struct inode *inode,
 	if (!uc->handler && !uc->ret_handler)
 		return ERR_PTR(-EINVAL);
 
-	/* copy_insn() uses read_mapping_page() or shmem_read_mapping_page() */
+	/* copy_insn() uses read_mapping_folio() or shmem_read_folio() */
 	if (!inode->i_mapping->a_ops->read_folio &&
 	    !shmem_mapping(inode->i_mapping))
 		return ERR_PTR(-EIO);
