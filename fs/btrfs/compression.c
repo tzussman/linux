@@ -1489,7 +1489,7 @@ static void heuristic_collect_sample(struct inode *inode, u64 start, u64 end,
 				     struct heuristic_ws *ws)
 {
 	struct page *page;
-	pgoff_t index, index_end;
+	u64 index, index_end;
 	u32 i, curr_sample_pos;
 	u8 *in_data;
 
