@@ -265,8 +265,15 @@ static ssize_t __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter,
 
 	blk_finish_plug(&plug);
 
-	if (!is_sync)
+	if (!is_sync) {
+		/*
+		 * iocb->private carried the metadata iterator for
+		 * bio_integrity_map_iter(). This path is not polled, so leave
+		 * nothing there for iocb_bio_iopoll() to treat as a bio.
+		 */
+		WRITE_ONCE(iocb->private, NULL);
 		return -EIOCBQUEUED;
+	}
 
 	for (;;) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
