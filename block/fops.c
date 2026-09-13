@@ -341,6 +341,10 @@ static ssize_t __blkdev_direct_IO_async(struct kiocb *iocb,
 	bio->bi_write_stream = iocb->ki_write_stream;
 	bio->bi_end_io = blkdev_bio_end_io_async;
 	bio->bi_ioprio = iocb->ki_ioprio;
+	if (iocb->ki_flags & IOCB_ATOMIC)
+		bio->bi_opf |= REQ_ATOMIC;
+	if (iocb->ki_flags & IOCB_NOWAIT)
+		bio->bi_opf |= REQ_NOWAIT;
 
 	/*
 	 * Users don't rely on the iterator being in any particular
@@ -370,12 +374,6 @@ static ssize_t __blkdev_direct_IO_async(struct kiocb *iocb,
 		if (unlikely(ret))
 			goto out_bio_put;
 	}
-
-	if (iocb->ki_flags & IOCB_ATOMIC)
-		bio->bi_opf |= REQ_ATOMIC;
-
-	if (iocb->ki_flags & IOCB_NOWAIT)
-		bio->bi_opf |= REQ_NOWAIT;
 
 	if (iocb->ki_flags & IOCB_HIPRI) {
 		bio->bi_opf |= REQ_POLLED;
