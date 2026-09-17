@@ -9076,6 +9076,7 @@ capability is unavailable, e.g. when the host PMU is mediated to guests.
 The following features are defined::
 
   #define KVM_X86_DET_TICKS   (1 << 0)
+  #define KVM_X86_DET_TSC     (1 << 1)
 
 KVM_X86_DET_TICKS gives each vCPU a tick counter: the number of events
 retired in guest mode, counted by a KVM-owned perf event that KVM switches
@@ -9097,6 +9098,18 @@ counts in guest mode, so no capability is required beyond access to
 bit) are rejected.  Creation of the counter is deferred to the first
 KVM_RUN and fails with the perf subsystem's error if the event cannot be
 programmed.
+
+KVM_X86_DET_TSC replaces the guest's TSC with a function of its ticks::
+
+  tsc = KVM_VCPU_DET_TSC_BASE + ticks * KVM_VCPU_DET_TSC_MULT
+
+RDTSC and RDTSCP exit and are emulated, as is IA32_TSC through RDMSR and
+KVM_GET_MSRS.  Guest writes to IA32_TSC and IA32_TSC_ADJUST move the base
+so that the clock stays a function of guest state.  The two attributes
+default to 0 and 1; userspace sets the multiplier to its nominal cycles
+per tick and adds to the base to fast-forward time, e.g. across HLT.
+The TSC deadline timer, the VMX preemption timer and kvmclock are all
+driven by host time and must not be exposed to such a guest.
 
 The vPMU must have been disabled with KVM_PMU_CAP_DISABLE, since a guest
 counter would compete with the tick counter; enabling the capability also

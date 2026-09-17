@@ -4289,7 +4289,9 @@ static void vmx_recalc_msr_intercepts(struct kvm_vcpu *vcpu)
 	if (!cpu_has_vmx_msr_bitmap())
 		return;
 
-	vmx_disable_intercept_for_msr(vcpu, MSR_IA32_TSC, MSR_TYPE_R);
+	/* A deterministic TSC is emulated, so keep intercepting its reads. */
+	if (!kvm_det_has(vcpu->kvm, KVM_X86_DET_TSC))
+		vmx_disable_intercept_for_msr(vcpu, MSR_IA32_TSC, MSR_TYPE_R);
 #ifdef CONFIG_X86_64
 	vmx_disable_intercept_for_msr(vcpu, MSR_FS_BASE, MSR_TYPE_RW);
 	vmx_disable_intercept_for_msr(vcpu, MSR_GS_BASE, MSR_TYPE_RW);
@@ -4651,6 +4653,9 @@ static u32 vmx_exec_control(struct vcpu_vmx *vmx)
 			  CPU_BASED_USE_IO_BITMAPS |
 			  CPU_BASED_MONITOR_TRAP_FLAG |
 			  CPU_BASED_PAUSE_EXITING);
+
+	if (kvm_det_has(vmx->vcpu.kvm, KVM_X86_DET_TSC))
+		exec_control |= CPU_BASED_RDTSC_EXITING;
 
 	/* INTR_WINDOW_EXITING and NMI_WINDOW_EXITING are toggled dynamically */
 	exec_control &= ~(CPU_BASED_INTR_WINDOW_EXITING |
@@ -6140,6 +6145,24 @@ static int handle_monitor_trap(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+/* RDTSC exits only when the VM has a deterministic TSC. */
+static int handle_rdtsc(struct kvm_vcpu *vcpu)
+{
+	u64 tsc = kvm_det_read_tsc(vcpu);
+
+	kvm_eax_write(vcpu, tsc);
+	kvm_edx_write(vcpu, tsc >> 32);
+	return kvm_skip_emulated_instruction(vcpu);
+}
+
+static int handle_rdtscp(struct kvm_vcpu *vcpu)
+{
+	struct vmx_uret_msr *msr = vmx_find_uret_msr(to_vmx(vcpu), MSR_TSC_AUX);
+
+	kvm_ecx_write(vcpu, msr ? msr->data : 0);
+	return handle_rdtsc(vcpu);
+}
+
 static int handle_invpcid(struct kvm_vcpu *vcpu)
 {
 	u32 vmx_instruction_info;
@@ -6368,6 +6391,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_PAUSE_INSTRUCTION]       = handle_pause,
 	[EXIT_REASON_MWAIT_INSTRUCTION]	      = kvm_emulate_mwait,
 	[EXIT_REASON_MONITOR_TRAP_FLAG]       = handle_monitor_trap,
+	[EXIT_REASON_RDTSC]                   = handle_rdtsc,
+	[EXIT_REASON_RDTSCP]                  = handle_rdtscp,
 	[EXIT_REASON_MONITOR_INSTRUCTION]     = kvm_emulate_monitor,
 	[EXIT_REASON_INVEPT]                  = handle_vmx_instruction,
 	[EXIT_REASON_INVVPID]                 = handle_vmx_instruction,
@@ -8035,6 +8060,9 @@ static __init u32 vmx_det_features(void)
 	if (!IS_ENABLED(CONFIG_KVM_X86_DETERMINISTIC) || enable_mediated_pmu ||
 	    !boot_cpu_has(X86_FEATURE_ARCH_PERFMON))
 		return 0;
+
+	if (vmcs_config.cpu_based_exec_ctrl & CPU_BASED_RDTSC_EXITING)
+		features |= KVM_X86_DET_TSC;
 
 	return features;
 }

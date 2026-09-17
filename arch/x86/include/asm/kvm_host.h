@@ -728,6 +728,10 @@ struct kvm_det_vcpu {
 	struct task_struct *task;
 	u64 tick_offset;
 	bool error;
+
+	/* KVM_X86_DET_TSC: virtual TSC = tsc_base + ticks * tsc_mult */
+	u64 tsc_base;
+	u64 tsc_mult;
 };
 
 struct kvm_vcpu_arch {

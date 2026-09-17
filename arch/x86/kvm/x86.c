@@ -9431,6 +9431,7 @@ int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu)
 		vcpu->arch.perf_capabilities = kvm_caps.supported_perf_cap;
 	}
 	kvm_pmu_init(vcpu);
+	kvm_det_vcpu_init(vcpu);
 
 	vcpu->arch.pending_external_vector = -1;
 	vcpu->arch.preempted_in_kernel = false;

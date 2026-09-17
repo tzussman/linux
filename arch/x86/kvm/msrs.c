@@ -6,6 +6,7 @@
 #include "hyperv.h"
 #include "lapic.h"
 #include "msrs.h"
+#include "det.h"
 #include "pmu.h"
 #include "trace.h"
 #include "vmx/vmx.h"
@@ -1584,7 +1585,12 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		break;
 	case MSR_IA32_TSC_ADJUST:
 		if (guest_cpu_cap_has(vcpu, X86_FEATURE_TSC_ADJUST)) {
-			if (!msr_info->host_initiated) {
+			if (kvm_det_has(vcpu->kvm, KVM_X86_DET_TSC)) {
+				/* Restores of the base and the MSR are independent. */
+				if (!msr_info->host_initiated)
+					vcpu->arch.det.tsc_base +=
+						data - vcpu->arch.ia32_tsc_adjust_msr;
+			} else if (!msr_info->host_initiated) {
 				s64 adj = data - vcpu->arch.ia32_tsc_adjust_msr;
 				adjust_tsc_offset_guest(vcpu, adj);
 				/* Before back to guest, tsc_timestamp must be adjusted
@@ -1628,7 +1634,12 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		vcpu->arch.msr_ia32_power_ctl = data;
 		break;
 	case MSR_IA32_TSC:
-		if (msr_info->host_initiated) {
+		if (kvm_det_has(vcpu->kvm, KVM_X86_DET_TSC)) {
+			if (!msr_info->host_initiated)
+				vcpu->arch.ia32_tsc_adjust_msr +=
+					data - kvm_det_read_tsc(vcpu);
+			kvm_det_write_tsc(vcpu, data);
+		} else if (msr_info->host_initiated) {
 			kvm_synchronize_tsc(vcpu, &data);
 		} else if (!vcpu->arch.guest_tsc_protected) {
 			u64 adj = kvm_compute_l1_tsc_offset(vcpu, data) - vcpu->arch.l1_tsc_offset;
@@ -1965,6 +1976,11 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		 * behavior for migration.
 		 */
 		u64 offset, ratio;
+
+		if (kvm_det_has(vcpu->kvm, KVM_X86_DET_TSC)) {
+			msr_info->data = kvm_det_read_tsc(vcpu);
+			break;
+		}
 
 		if (msr_info->host_initiated) {
 			offset = vcpu->arch.l1_tsc_offset;

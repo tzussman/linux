@@ -329,3 +329,23 @@ Reads or sets the vCPU's tick count, the number of conditional branches
 retired in guest mode since the count was last set (initially zero).
 Setting the count, e.g. when restoring a snapshot, does not disturb the
 underlying counter; subsequent reads continue from the value written.
+
+8.2 ATTRIBUTE: KVM_VCPU_DET_TSC_BASE
+
+:Parameters: 64-bit unsigned TSC value at tick 0
+
+8.3 ATTRIBUTE: KVM_VCPU_DET_TSC_MULT
+
+:Parameters: 64-bit unsigned TSC cycles per tick
+
+Returns:
+
+	 ======= ======================================
+	 -EFAULT Error reading/writing the provided
+		 parameter address.
+	 -ENXIO  Attribute not supported, or
+		 KVM_X86_DET_TSC not enabled
+	 ======= ======================================
+
+The guest's TSC is KVM_VCPU_DET_TSC_BASE + ticks * KVM_VCPU_DET_TSC_MULT.
+Guest writes to IA32_TSC and IA32_TSC_ADJUST are folded into the base.

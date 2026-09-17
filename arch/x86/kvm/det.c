@@ -49,6 +49,13 @@ int kvm_det_enable(struct kvm *kvm, u32 features, u64 tick_event)
 	return r;
 }
 
+void kvm_det_vcpu_init(struct kvm_vcpu *vcpu)
+{
+	struct kvm_det_vcpu *det = &vcpu->arch.det;
+
+	det->tsc_mult = 1;
+}
+
 static struct perf_event *kvm_det_create_event(struct kvm_vcpu *vcpu)
 {
 	struct perf_event_attr attr = {
@@ -155,6 +162,25 @@ int kvm_det_set_ticks(struct kvm_vcpu *vcpu, u64 ticks)
 }
 
 /*
+ * The virtual TSC advances with the guest's own branches rather than
+ * with host time.  Guest writes to IA32_TSC or IA32_TSC_ADJUST move the
+ * base so that they remain a deterministic function of guest state.
+ */
+u64 kvm_det_read_tsc(struct kvm_vcpu *vcpu)
+{
+	struct kvm_det_vcpu *det = &vcpu->arch.det;
+
+	return det->tsc_base + kvm_det_ticks(vcpu) * det->tsc_mult;
+}
+
+void kvm_det_write_tsc(struct kvm_vcpu *vcpu, u64 tsc)
+{
+	struct kvm_det_vcpu *det = &vcpu->arch.det;
+
+	det->tsc_base = tsc - kvm_det_ticks(vcpu) * det->tsc_mult;
+}
+
+/*
  * Called before every VM-Entry.  Returns 0 with the run structure filled
  * in if the counter has stopped (a pinned event that lost its counter is
  * in the error state; a throttled one is stopped), else 1.
@@ -185,6 +211,9 @@ int kvm_det_vcpu_has_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 	switch (attr->attr) {
 	case KVM_VCPU_DET_TICKS:
 		return 0;
+	case KVM_VCPU_DET_TSC_BASE:
+	case KVM_VCPU_DET_TSC_MULT:
+		return kvm_det_has(vcpu->kvm, KVM_X86_DET_TSC) ? 0 : -ENXIO;
 	default:
 		return -ENXIO;
 	}
@@ -193,6 +222,7 @@ int kvm_det_vcpu_has_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 int kvm_det_vcpu_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 {
 	void __user *uaddr = u64_to_user_ptr(attr->addr);
+	struct kvm_det_vcpu *det = &vcpu->arch.det;
 	u64 val;
 	int r;
 
@@ -204,6 +234,12 @@ int kvm_det_vcpu_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 	case KVM_VCPU_DET_TICKS:
 		val = kvm_det_ticks(vcpu);
 		break;
+	case KVM_VCPU_DET_TSC_BASE:
+		val = det->tsc_base;
+		break;
+	case KVM_VCPU_DET_TSC_MULT:
+		val = det->tsc_mult;
+		break;
 	default:
 		return -ENXIO;
 	}
@@ -213,6 +249,7 @@ int kvm_det_vcpu_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 int kvm_det_vcpu_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 {
 	void __user *uaddr = u64_to_user_ptr(attr->addr);
+	struct kvm_det_vcpu *det = &vcpu->arch.det;
 	u64 val;
 	int r;
 
@@ -225,6 +262,16 @@ int kvm_det_vcpu_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 		if (get_user(val, (u64 __user *)uaddr))
 			return -EFAULT;
 		return kvm_det_set_ticks(vcpu, val);
+	case KVM_VCPU_DET_TSC_BASE:
+		if (get_user(val, (u64 __user *)uaddr))
+			return -EFAULT;
+		det->tsc_base = val;
+		return 0;
+	case KVM_VCPU_DET_TSC_MULT:
+		if (get_user(val, (u64 __user *)uaddr))
+			return -EFAULT;
+		det->tsc_mult = val;
+		return 0;
 	default:
 		return -ENXIO;
 	}

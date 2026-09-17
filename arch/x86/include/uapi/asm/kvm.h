@@ -965,9 +965,12 @@ struct kvm_hyperv_eventfd {
 #define   KVM_VCPU_TSC_OFFSET 0 /* attribute for the TSC offset */
 #define KVM_VCPU_DET_CTRL 1 /* control group for deterministic execution */
 #define   KVM_VCPU_DET_TICKS 0 /* conditional branches retired in guest mode */
+#define   KVM_VCPU_DET_TSC_BASE 1 /* virtual TSC at tick 0 */
+#define   KVM_VCPU_DET_TSC_MULT 2 /* virtual TSC cycles per tick */
 
 /* Features for KVM_CAP_X86_DETERMINISTIC. */
 #define KVM_X86_DET_TICKS	_BITULL(0)
+#define KVM_X86_DET_TSC		_BITULL(1)
 
 /* x86-specific KVM_EXIT_HYPERCALL flags. */
 #define KVM_EXIT_HYPERCALL_LONG_MODE	_BITULL(0)
