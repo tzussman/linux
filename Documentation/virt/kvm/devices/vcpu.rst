@@ -349,3 +349,20 @@ Returns:
 
 The guest's TSC is KVM_VCPU_DET_TSC_BASE + ticks * KVM_VCPU_DET_TSC_MULT.
 Guest writes to IA32_TSC and IA32_TSC_ADJUST are folded into the base.
+
+8.4 ATTRIBUTE: KVM_VCPU_DET_RNG_STATE
+
+:Parameters: struct kvm_x86_det_rng, the xoshiro256** state
+
+Returns:
+
+	 ======= ======================================
+	 -EFAULT Error reading/writing the provided
+		 parameter address.
+	 -EINVAL All-zero state
+	 -ENXIO  Attribute not supported, or
+		 KVM_X86_DET_RNG not enabled
+	 ======= ======================================
+
+The state of the generator that serves the guest's RDRAND and RDSEED.
+Each instruction draws one 64-bit output, truncated to the operand size.

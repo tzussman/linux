@@ -732,6 +732,9 @@ struct kvm_det_vcpu {
 	/* KVM_X86_DET_TSC: virtual TSC = tsc_base + ticks * tsc_mult */
 	u64 tsc_base;
 	u64 tsc_mult;
+
+	/* KVM_X86_DET_RNG: xoshiro256** state behind RDRAND and RDSEED */
+	u64 rng[4];
 };
 
 struct kvm_vcpu_arch {

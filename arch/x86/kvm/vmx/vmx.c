@@ -4845,6 +4845,11 @@ static u32 vmx_secondary_exec_control(struct vcpu_vmx *vmx)
 	vmx_adjust_sec_exec_exiting(vmx, &exec_control, rdrand, RDRAND);
 	vmx_adjust_sec_exec_exiting(vmx, &exec_control, rdseed, RDSEED);
 
+	/* Hiding RDRAND in CPUID is not enforcement; intercept regardless. */
+	if (kvm_det_has(vcpu->kvm, KVM_X86_DET_RNG))
+		exec_control |= SECONDARY_EXEC_RDRAND_EXITING |
+				SECONDARY_EXEC_RDSEED_EXITING;
+
 	vmx_adjust_sec_exec_control(vmx, &exec_control, waitpkg, WAITPKG,
 				    ENABLE_USR_WAIT_PAUSE, false);
 
@@ -6163,6 +6168,39 @@ static int handle_rdtscp(struct kvm_vcpu *vcpu)
 	return handle_rdtsc(vcpu);
 }
 
+/*
+ * RDRAND and RDSEED exit only when the VM has a deterministic RNG.  The
+ * destination register and operand size come from the instruction
+ * information field; the result always "succeeds" with CF=1.
+ */
+static int handle_rdrand(struct kvm_vcpu *vcpu)
+{
+	u32 info = vmcs_read32(VMX_INSTRUCTION_INFO);
+	int reg = vmx_get_instr_info_reg(info);
+	unsigned long rflags;
+	u64 val;
+
+	if (!kvm_det_has(vcpu->kvm, KVM_X86_DET_RNG))
+		return kvm_handle_invalid_op(vcpu);
+
+	val = kvm_det_rand(vcpu);
+	switch ((info >> 11) & 3) {
+	case 0:
+		val = (kvm_register_read(vcpu, reg) & ~0xffffULL) | (u16)val;
+		break;
+	case 1:
+		val = (u32)val;
+		break;
+	}
+	kvm_register_write(vcpu, reg, val);
+
+	rflags = vmx_get_rflags(vcpu);
+	rflags &= ~(X86_EFLAGS_OF | X86_EFLAGS_SF | X86_EFLAGS_ZF |
+		    X86_EFLAGS_AF | X86_EFLAGS_PF);
+	vmx_set_rflags(vcpu, rflags | X86_EFLAGS_CF);
+	return kvm_skip_emulated_instruction(vcpu);
+}
+
 static int handle_invpcid(struct kvm_vcpu *vcpu)
 {
 	u32 vmx_instruction_info;
@@ -6396,8 +6434,8 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_MONITOR_INSTRUCTION]     = kvm_emulate_monitor,
 	[EXIT_REASON_INVEPT]                  = handle_vmx_instruction,
 	[EXIT_REASON_INVVPID]                 = handle_vmx_instruction,
-	[EXIT_REASON_RDRAND]                  = kvm_handle_invalid_op,
-	[EXIT_REASON_RDSEED]                  = kvm_handle_invalid_op,
+	[EXIT_REASON_RDRAND]                  = handle_rdrand,
+	[EXIT_REASON_RDSEED]                  = handle_rdrand,
 	[EXIT_REASON_PML_FULL]		      = handle_pml_full,
 	[EXIT_REASON_INVPCID]                 = handle_invpcid,
 	[EXIT_REASON_VMFUNC]		      = handle_vmx_instruction,
@@ -8063,6 +8101,8 @@ static __init u32 vmx_det_features(void)
 
 	if (vmcs_config.cpu_based_exec_ctrl & CPU_BASED_RDTSC_EXITING)
 		features |= KVM_X86_DET_TSC;
+	if (cpu_has_vmx_rdrand() && cpu_has_vmx_rdseed())
+		features |= KVM_X86_DET_RNG;
 
 	return features;
 }

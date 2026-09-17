@@ -9077,6 +9077,7 @@ The following features are defined::
 
   #define KVM_X86_DET_TICKS   (1 << 0)
   #define KVM_X86_DET_TSC     (1 << 1)
+  #define KVM_X86_DET_RNG     (1 << 2)
 
 KVM_X86_DET_TICKS gives each vCPU a tick counter: the number of events
 retired in guest mode, counted by a KVM-owned perf event that KVM switches
@@ -9110,6 +9111,13 @@ default to 0 and 1; userspace sets the multiplier to its nominal cycles
 per tick and adds to the base to fast-forward time, e.g. across HLT.
 The TSC deadline timer, the VMX preemption timer and kvmclock are all
 driven by host time and must not be exposed to such a guest.
+
+KVM_X86_DET_RNG intercepts RDRAND and RDSEED, whether or not CPUID
+advertises them, and fills the destination from a per-vCPU xoshiro256**
+generator with CF set.  The generator's 256-bit state is readable and
+writable as KVM_VCPU_DET_RNG_STATE (struct kvm_x86_det_rng) so that it
+can be seeded and restored with a snapshot; it starts from a fixed
+function of the vCPU id.
 
 The vPMU must have been disabled with KVM_PMU_CAP_DISABLE, since a guest
 counter would compete with the tick counter; enabling the capability also

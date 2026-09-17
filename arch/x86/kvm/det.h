@@ -23,6 +23,7 @@ u64 kvm_det_ticks(struct kvm_vcpu *vcpu);
 int kvm_det_set_ticks(struct kvm_vcpu *vcpu, u64 ticks);
 u64 kvm_det_read_tsc(struct kvm_vcpu *vcpu);
 void kvm_det_write_tsc(struct kvm_vcpu *vcpu, u64 tsc);
+u64 kvm_det_rand(struct kvm_vcpu *vcpu);
 int kvm_det_pre_run(struct kvm_vcpu *vcpu);
 int kvm_det_vcpu_has_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr);
 int kvm_det_vcpu_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr);
@@ -51,6 +52,10 @@ static inline u64 kvm_det_read_tsc(struct kvm_vcpu *vcpu)
 	return 0;
 }
 static inline void kvm_det_write_tsc(struct kvm_vcpu *vcpu, u64 tsc) {}
+static inline u64 kvm_det_rand(struct kvm_vcpu *vcpu)
+{
+	return 0;
+}
 static inline int kvm_det_pre_run(struct kvm_vcpu *vcpu)
 {
 	return 1;

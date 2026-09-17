@@ -49,11 +49,45 @@ int kvm_det_enable(struct kvm *kvm, u32 features, u64 tick_event)
 	return r;
 }
 
+/* splitmix64, used only to derive a non-zero initial RNG state. */
+static u64 splitmix64(u64 *x)
+{
+	u64 z = (*x += 0x9e3779b97f4a7c15ULL);
+
+	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+	z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+	return z ^ (z >> 31);
+}
+
 void kvm_det_vcpu_init(struct kvm_vcpu *vcpu)
 {
 	struct kvm_det_vcpu *det = &vcpu->arch.det;
+	u64 seed = vcpu->vcpu_id;
+	int i;
 
 	det->tsc_mult = 1;
+	for (i = 0; i < 4; i++)
+		det->rng[i] = splitmix64(&seed);
+}
+
+/*
+ * xoshiro256**.  The guest sees the sequence, so the generator is part
+ * of the ABI: the state is exposed as an attribute and the algorithm is
+ * fixed by this implementation.
+ */
+u64 kvm_det_rand(struct kvm_vcpu *vcpu)
+{
+	u64 *s = vcpu->arch.det.rng;
+	u64 result = rol64(s[1] * 5, 7) * 9;
+	u64 t = s[1] << 17;
+
+	s[2] ^= s[0];
+	s[3] ^= s[1];
+	s[1] ^= s[2];
+	s[0] ^= s[3];
+	s[2] ^= t;
+	s[3] = rol64(s[3], 45);
+	return result;
 }
 
 static struct perf_event *kvm_det_create_event(struct kvm_vcpu *vcpu)
@@ -214,6 +248,8 @@ int kvm_det_vcpu_has_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 	case KVM_VCPU_DET_TSC_BASE:
 	case KVM_VCPU_DET_TSC_MULT:
 		return kvm_det_has(vcpu->kvm, KVM_X86_DET_TSC) ? 0 : -ENXIO;
+	case KVM_VCPU_DET_RNG_STATE:
+		return kvm_det_has(vcpu->kvm, KVM_X86_DET_RNG) ? 0 : -ENXIO;
 	default:
 		return -ENXIO;
 	}
@@ -240,6 +276,8 @@ int kvm_det_vcpu_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 	case KVM_VCPU_DET_TSC_MULT:
 		val = det->tsc_mult;
 		break;
+	case KVM_VCPU_DET_RNG_STATE:
+		return copy_to_user(uaddr, det->rng, sizeof(det->rng)) ? -EFAULT : 0;
 	default:
 		return -ENXIO;
 	}
@@ -250,7 +288,7 @@ int kvm_det_vcpu_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 {
 	void __user *uaddr = u64_to_user_ptr(attr->addr);
 	struct kvm_det_vcpu *det = &vcpu->arch.det;
-	u64 val;
+	u64 rng[4], val;
 	int r;
 
 	r = kvm_det_vcpu_has_attr(vcpu, attr);
@@ -271,6 +309,14 @@ int kvm_det_vcpu_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 		if (get_user(val, (u64 __user *)uaddr))
 			return -EFAULT;
 		det->tsc_mult = val;
+		return 0;
+	case KVM_VCPU_DET_RNG_STATE:
+		if (copy_from_user(rng, uaddr, sizeof(rng)))
+			return -EFAULT;
+		/* xoshiro256** never leaves the all-zero state. */
+		if (!(rng[0] | rng[1] | rng[2] | rng[3]))
+			return -EINVAL;
+		memcpy(det->rng, rng, sizeof(rng));
 		return 0;
 	default:
 		return -ENXIO;
