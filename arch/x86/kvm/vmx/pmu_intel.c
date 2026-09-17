@@ -14,6 +14,7 @@
 #include <linux/kvm_host.h>
 #include <linux/perf_event.h>
 #include <asm/msr.h>
+#include <asm/cpu_device_id.h>
 #include <asm/perf_event.h>
 #include <asm/cpuid/api.h>
 #include "x86.h"
@@ -831,6 +832,54 @@ static void intel_mediated_pmu_put(struct kvm_vcpu *vcpu)
 		wrmsrq(MSR_CORE_PERF_FIXED_CTR_CTRL, 0);
 }
 
+/*
+ * The event a deterministic VM counts as ticks.  Exactness is a property
+ * of the microarchitecture: BR_INST_RETIRED.CONDITIONAL is validated on
+ * Skylake and rr uses it from Nehalem on; from Ice Lake the same umask
+ * counts only taken branches and .COND moved to umask 0x11.  Userspace may
+ * pass its own raw event, minus anything that would count outside the
+ * guest or change how the event is delivered.
+ */
+static int intel_det_tick_event(u64 *config)
+{
+	const u64 allowed = ARCH_PERFMON_EVENTSEL_EVENT | ARCH_PERFMON_EVENTSEL_UMASK |
+			    ARCH_PERFMON_EVENTSEL_EDGE | ARCH_PERFMON_EVENTSEL_INV |
+			    ARCH_PERFMON_EVENTSEL_CMASK | HSW_IN_TX | HSW_IN_TX_CHECKPOINTED;
+	u64 event;
+
+	if (*config)
+		return *config & ~allowed ? -EINVAL : 0;
+
+	switch (boot_cpu_data.x86_vfm) {
+	case INTEL_SKYLAKE_L:
+	case INTEL_SKYLAKE:
+	case INTEL_SKYLAKE_X:
+	case INTEL_KABYLAKE_L:
+	case INTEL_KABYLAKE:
+	case INTEL_COMETLAKE:
+	case INTEL_COMETLAKE_L:
+		event = 0x01c4;
+		break;
+	case INTEL_ICELAKE_X:
+	case INTEL_ICELAKE_D:
+	case INTEL_ICELAKE:
+	case INTEL_ICELAKE_L:
+	case INTEL_TIGERLAKE:
+	case INTEL_SAPPHIRERAPIDS_X:
+	case INTEL_EMERALDRAPIDS_X:
+		event = 0x11c4;
+		break;
+	default:
+		return -ENODEV;
+	}
+
+	/* Exclude branches in aborted transactions; needs PMC2. */
+	if (boot_cpu_has(X86_FEATURE_RTM))
+		event |= HSW_IN_TX_CHECKPOINTED;
+	*config = event;
+	return 0;
+}
+
 struct kvm_pmu_ops intel_pmu_ops __initdata = {
 	.rdpmc_ecx_to_pmc = intel_rdpmc_ecx_to_pmc,
 	.msr_idx_to_pmc = intel_msr_idx_to_pmc,
@@ -838,6 +887,7 @@ struct kvm_pmu_ops intel_pmu_ops __initdata = {
 	.get_msr = intel_pmu_get_msr,
 	.set_msr = intel_pmu_set_msr,
 	.refresh = intel_pmu_refresh,
+	.det_tick_event = intel_det_tick_event,
 	.init = intel_pmu_init,
 	.reset = intel_pmu_reset,
 	.deliver_pmi = intel_pmu_deliver_pmi,

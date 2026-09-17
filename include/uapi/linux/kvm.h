@@ -203,6 +203,8 @@ struct kvm_exit_snp_req_certs {
 #define KVM_INTERNAL_ERROR_DELIVERY_EV	3
 /* Encounter unexpected vm-exit reason */
 #define KVM_INTERNAL_ERROR_UNEXPECTED_EXIT_REASON	4
+/* The KVM_CAP_X86_DETERMINISTIC tick counter stopped counting. */
+#define KVM_INTERNAL_ERROR_DET_COUNTER	5
 
 /* Flags that describe what fields in emulation_failure hold valid data. */
 #define KVM_INTERNAL_ERROR_EMULATION_FLAG_INSTRUCTION_BYTES (1ULL << 0)
@@ -999,6 +1001,7 @@ struct kvm_enable_cap {
 #define KVM_CAP_S390_HPAGE_2G 249
 #define KVM_CAP_PPC_COMPAT_CAPS 250
 #define KVM_CAP_ARM_PMU_V3_STRICT 251
+#define KVM_CAP_X86_DETERMINISTIC 252
 
 struct kvm_irq_routing_irqchip {
 	__u32 irqchip;

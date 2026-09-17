@@ -9056,6 +9056,60 @@ enabled, cmma can't be enabled anymore and pfmfi and the storage key
 interpretation are disabled. If cmma has already been enabled or the
 hpage_2g module parameter is not set to 1, -EINVAL is returned.
 
+7.48 KVM_CAP_X86_DETERMINISTIC
+------------------------------
+
+:Architectures: x86 (Intel VMX, with CONFIG_KVM_X86_DETERMINISTIC)
+:Target: VM
+:Parameters: args[0] is a bitmask of features to enable; args[1] is the raw
+             perf event (PERF_TYPE_RAW config) to count as ticks, or zero
+             for KVM's default
+:Returns: 0 on success; -EINVAL if args[0] contains unsupported bits, does
+          not include KVM_X86_DET_TICKS, vCPUs have already been created,
+          the vPMU has not been disabled with KVM_PMU_CAP_DISABLE, or
+          args[1] contains bits other than event, umask, edge, inv, cmask
+          and the IN_TX/IN_TXCP qualifiers; -ENODEV if args[1] is zero
+          and KVM has no validated default event for this CPU model
+
+KVM_CHECK_EXTENSION returns the set of supported features, zero if the
+capability is unavailable, e.g. when the host PMU is mediated to guests.
+The following features are defined::
+
+  #define KVM_X86_DET_TICKS   (1 << 0)
+
+KVM_X86_DET_TICKS gives each vCPU a tick counter: the number of events
+retired in guest mode, counted by a KVM-owned perf event that KVM switches
+on and off atomically at every VM-Entry and VM-Exit.  Together with
+interception of every other source of nondeterminism, the tick count is a
+clock that depends only on the guest's instruction stream, which is the
+basis for deterministic record and replay of a VM.  The count is read and
+adjusted through the KVM_VCPU_DET_CTRL vCPU device attribute group.
+Only branches the CPU retires count: a branch that KVM emulates in
+software, which happens only on paths a well-formed guest does not take
+(e.g. invalid guest state without unrestricted guest), is not a tick.
+
+Which event counts exactly is a property of the microarchitecture, so
+userspace may pass the raw event in args[1].  Zero selects KVM's default
+for the CPU model, BR_INST_RETIRED.CONDITIONAL with IN_TXCP where the host
+supports TSX, validated on Skylake.  As with the vPMU, the event only
+counts in guest mode, so no capability is required beyond access to
+/dev/kvm, but bits that would count other contexts (e.g. the "any thread"
+bit) are rejected.  Creation of the counter is deferred to the first
+KVM_RUN and fails with the perf subsystem's error if the event cannot be
+programmed.
+
+The vPMU must have been disabled with KVM_PMU_CAP_DISABLE, since a guest
+counter would compete with the tick counter; enabling the capability also
+hides VMX from the guest, since the controls involved are not virtualized
+for nested guests.  The counter is bound to the thread running the vCPU
+and follows the vCPU if another thread takes over.  If the counter stops
+counting, e.g. because the host PMU had no free counter for a pinned
+event, KVM_RUN exits with KVM_EXIT_INTERNAL_ERROR and suberror
+KVM_INTERNAL_ERROR_DET_COUNTER, as the guest's clock cannot be recovered.
+The host must not use the performance counters on the CPUs the vCPU runs
+on (the NMI watchdog included).  Host SMIs count unless the PMU freezes
+in SMM (/sys/devices/cpu/freeze_on_smi).
+
 8. Other capabilities.
 ======================
 

@@ -43,6 +43,9 @@ struct kvm_pmu_ops {
 	void (*mediated_put)(struct kvm_vcpu *vcpu);
 	void (*write_global_ctrl)(u64 global_ctrl);
 
+	/* KVM_CAP_X86_DETERMINISTIC: default or sanitized raw tick event */
+	int (*det_tick_event)(u64 *config);
+
 	const u64 EVENTSEL_EVENT;
 	const int MAX_NR_GP_COUNTERS;
 	const int MIN_NR_GP_COUNTERS;

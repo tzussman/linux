@@ -63,6 +63,7 @@
 #include "lapic.h"
 #include "mmu.h"
 #include "nested.h"
+#include "det.h"
 #include "pmu.h"
 #include "sgx.h"
 #include "trace.h"
@@ -8022,6 +8023,22 @@ void vmx_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu)
 	vmx_update_exception_bitmap(vcpu);
 }
 
+/*
+ * Deterministic execution needs the guest-only branch counter to be
+ * switched by the VMCS MSR load/store lists, which the mediated PMU
+ * bypasses.
+ */
+static __init u32 vmx_det_features(void)
+{
+	u32 features = KVM_X86_DET_TICKS;
+
+	if (!IS_ENABLED(CONFIG_KVM_X86_DETERMINISTIC) || enable_mediated_pmu ||
+	    !boot_cpu_has(X86_FEATURE_ARCH_PERFMON))
+		return 0;
+
+	return features;
+}
+
 static __init u64 vmx_get_perf_capabilities(void)
 {
 	u64 perf_cap = PERF_CAP_FW_WRITES;
@@ -8776,6 +8793,7 @@ __init int vmx_hardware_setup(void)
 	kvm_caps.tsc_scaling_ratio_frac_bits = 48;
 	kvm_caps.has_bus_lock_exit = cpu_has_vmx_bus_lock_detection();
 	kvm_caps.has_notify_vmexit = cpu_has_notify_vmexit();
+	kvm_caps.supported_det_features = vmx_det_features();
 
 	set_bit(0, vmx_vpid_bitmap); /* 0 is reserved for host */
 

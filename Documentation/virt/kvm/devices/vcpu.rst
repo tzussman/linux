@@ -302,3 +302,30 @@ From the destination VMM process:
 
 7. Write the KVM_VCPU_TSC_OFFSET attribute for every vCPU with the
    respective value derived in the previous step.
+
+8. GROUP: KVM_VCPU_DET_CTRL
+===========================
+
+:Architectures: x86
+
+Available when KVM_CAP_X86_DETERMINISTIC is enabled for the VM.  The
+state behind these attributes is not architectural: it is not touched by
+INIT or by a vCPU reset and is not part of any other ioctl's state, so
+userspace saves, restores and resets it explicitly.
+
+8.1 ATTRIBUTE: KVM_VCPU_DET_TICKS
+
+:Parameters: 64-bit unsigned tick count
+
+Returns:
+
+	 ======= ======================================
+	 -EFAULT Error reading/writing the provided
+		 parameter address.
+	 -ENXIO  Attribute not supported
+	 ======= ======================================
+
+Reads or sets the vCPU's tick count, the number of conditional branches
+retired in guest mode since the count was last set (initially zero).
+Setting the count, e.g. when restoring a snapshot, does not disturb the
+underlying counter; subsequent reads continue from the value written.

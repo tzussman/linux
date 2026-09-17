@@ -301,10 +301,16 @@ static bool amd_pmc_is_disabled_in_current_mode(struct kvm_pmc *pmc)
 	return !!(host_guest_bits & AMD64_EVENTSEL_GUESTONLY) != is_guest_mode(vcpu);
 }
 
+static int amd_det_tick_event(u64 *config)
+{
+	return -EOPNOTSUPP;
+}
+
 struct kvm_pmu_ops amd_pmu_ops __initdata = {
 	.rdpmc_ecx_to_pmc = amd_rdpmc_ecx_to_pmc,
 	.msr_idx_to_pmc = amd_msr_idx_to_pmc,
 	.check_rdpmc_early = amd_check_rdpmc_early,
+	.det_tick_event = amd_det_tick_event,
 	.is_valid_msr = amd_is_valid_msr,
 	.get_msr = amd_pmu_get_msr,
 	.set_msr = amd_pmu_set_msr,

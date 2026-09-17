@@ -28,6 +28,7 @@
 #include "trace.h"
 #include "pmu.h"
 #include "xen.h"
+#include "det.h"
 #include "x86.h"
 
 /*
@@ -428,6 +429,16 @@ void kvm_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu)
 	allow_gbpages = tdp_enabled ? boot_cpu_has(X86_FEATURE_GBPAGES) :
 				      guest_cpu_cap_has(vcpu, X86_FEATURE_GBPAGES);
 	guest_cpu_cap_change(vcpu, X86_FEATURE_GBPAGES, allow_gbpages);
+
+	/*
+	 * A deterministic VM gets no nested virtualization: the controls its
+	 * clock relies on are not virtualized for nested guests, and CR4.VMXE
+	 * and EFER.SVME must be reserved accordingly (computed below).
+	 */
+	if (kvm_det_enabled(vcpu->kvm)) {
+		guest_cpu_cap_clear(vcpu, X86_FEATURE_VMX);
+		guest_cpu_cap_clear(vcpu, X86_FEATURE_SVM);
+	}
 
 	best = kvm_find_cpuid_entry(vcpu, 1);
 	if (best && apic) {

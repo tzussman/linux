@@ -278,6 +278,9 @@ struct kvm_caps {
 
 	u64 supported_quirks;
 	u64 inapplicable_quirks;
+
+	/* KVM_CAP_X86_DETERMINISTIC features */
+	u32 supported_det_features;
 };
 extern struct kvm_caps kvm_caps;
 
@@ -715,6 +718,18 @@ enum kvm_only_cpuid_leafs {
 	NKVMCAPINTS = NR_KVM_CPU_CAPS - NCAPINTS,
 };
 
+/*
+ * Deterministic execution (KVM_CAP_X86_DETERMINISTIC): a KVM-owned perf
+ * event counting conditional branches retired in guest mode.  The count
+ * plus tick_offset is the vCPU's tick count, its notion of time.
+ */
+struct kvm_det_vcpu {
+	struct perf_event *event;
+	struct task_struct *task;
+	u64 tick_offset;
+	bool error;
+};
+
 struct kvm_vcpu_arch {
 	/*
 	 * rip and regs accesses must go through
@@ -927,6 +942,8 @@ struct kvm_vcpu_arch {
 	u64 mmio_gen;
 
 	struct kvm_pmu pmu;
+
+	struct kvm_det_vcpu det;
 
 	/* used for guest single stepping over the given code position */
 	unsigned long singlestep_rip;
@@ -1299,6 +1316,11 @@ struct kvm_arch {
 	struct kvm_x86_msr_filter __rcu *msr_filter;
 
 	u32 hypercall_exit_enabled;
+
+	/* KVM_CAP_X86_DETERMINISTIC */
+	bool det_enabled;
+	u32 det_features;
+	u64 det_tick_event;
 
 	/* Guest can access the SGX PROVISIONKEY. */
 	bool sgx_provisioning_allowed;

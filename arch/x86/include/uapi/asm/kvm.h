@@ -963,6 +963,11 @@ struct kvm_hyperv_eventfd {
 /* for KVM_{GET,SET,HAS}_DEVICE_ATTR */
 #define KVM_VCPU_TSC_CTRL 0 /* control group for the timestamp counter (TSC) */
 #define   KVM_VCPU_TSC_OFFSET 0 /* attribute for the TSC offset */
+#define KVM_VCPU_DET_CTRL 1 /* control group for deterministic execution */
+#define   KVM_VCPU_DET_TICKS 0 /* conditional branches retired in guest mode */
+
+/* Features for KVM_CAP_X86_DETERMINISTIC. */
+#define KVM_X86_DET_TICKS	_BITULL(0)
 
 /* x86-specific KVM_EXIT_HYPERCALL flags. */
 #define KVM_EXIT_HYPERCALL_LONG_MODE	_BITULL(0)

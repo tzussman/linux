@@ -28,6 +28,7 @@
 #include "mmu/page_track.h"
 #include "x86.h"
 #include "cpuid.h"
+#include "det.h"
 #include "pmu.h"
 #include "hyperv.h"
 #include "lapic.h"
@@ -2294,6 +2295,9 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 	case KVM_CAP_EXIT_HYPERCALL:
 		r = KVM_EXIT_HYPERCALL_VALID_MASK;
 		break;
+	case KVM_CAP_X86_DETERMINISTIC:
+		r = kvm_caps.supported_det_features;
+		break;
 	case KVM_CAP_SET_GUEST_DEBUG2:
 		return KVM_GUESTDBG_VALID_MASK;
 #ifdef CONFIG_KVM_XEN
@@ -3341,19 +3345,35 @@ static int kvm_vcpu_ioctl_device_attr(struct kvm_vcpu *vcpu,
 	if (copy_from_user(&attr, argp, sizeof(attr)))
 		return -EFAULT;
 
-	if (attr.group != KVM_VCPU_TSC_CTRL)
-		return -ENXIO;
-
-	switch (ioctl) {
-	case KVM_HAS_DEVICE_ATTR:
-		r = kvm_arch_tsc_has_attr(vcpu, &attr);
+	switch (attr.group) {
+	case KVM_VCPU_TSC_CTRL:
+		switch (ioctl) {
+		case KVM_HAS_DEVICE_ATTR:
+			r = kvm_arch_tsc_has_attr(vcpu, &attr);
+			break;
+		case KVM_GET_DEVICE_ATTR:
+			r = kvm_arch_tsc_get_attr(vcpu, &attr);
+			break;
+		case KVM_SET_DEVICE_ATTR:
+			r = kvm_arch_tsc_set_attr(vcpu, &attr);
+			break;
+		}
 		break;
-	case KVM_GET_DEVICE_ATTR:
-		r = kvm_arch_tsc_get_attr(vcpu, &attr);
+	case KVM_VCPU_DET_CTRL:
+		switch (ioctl) {
+		case KVM_HAS_DEVICE_ATTR:
+			r = kvm_det_vcpu_has_attr(vcpu, &attr);
+			break;
+		case KVM_GET_DEVICE_ATTR:
+			r = kvm_det_vcpu_get_attr(vcpu, &attr);
+			break;
+		case KVM_SET_DEVICE_ATTR:
+			r = kvm_det_vcpu_set_attr(vcpu, &attr);
+			break;
+		}
 		break;
-	case KVM_SET_DEVICE_ATTR:
-		r = kvm_arch_tsc_set_attr(vcpu, &attr);
-		break;
+	default:
+		r = -ENXIO;
 	}
 
 	return r;
@@ -4101,6 +4121,12 @@ disable_exits_unlock:
 		}
 		kvm->arch.hypercall_exit_enabled = cap->args[0];
 		r = 0;
+		break;
+	case KVM_CAP_X86_DETERMINISTIC:
+		r = -EINVAL;
+		if (cap->args[0] > U32_MAX)
+			break;
+		r = kvm_det_enable(kvm, cap->args[0], cap->args[1]);
 		break;
 	case KVM_CAP_EXIT_ON_EMULATION_FAILURE:
 		r = -EINVAL;
@@ -8253,6 +8279,11 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		goto cancel_injection;
 	}
 
+	if (unlikely(kvm_det_enabled(vcpu->kvm)) && !kvm_det_pre_run(vcpu)) {
+		r = 0;
+		goto cancel_injection;
+	}
+
 	preempt_disable();
 
 	kvm_x86_call(prepare_switch_to_guest)(vcpu);
@@ -8889,6 +8920,10 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 	if (r)
 		return r;
 
+	r = kvm_det_vcpu_run(vcpu);
+	if (r)
+		return r;
+
 	vcpu_load(vcpu);
 	kvm_sigset_activate(vcpu);
 	kvm_run->flags = 0;
@@ -9462,6 +9497,7 @@ void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu)
 
 	kvm_x86_call(vcpu_free)(vcpu);
 
+	kvm_det_vcpu_destroy(vcpu);
 	kmem_cache_free(x86_emulator_cache, vcpu->arch.emulate_ctxt);
 	free_cpumask_var(vcpu->arch.wbinvd_dirty_mask);
 	fpu_free_guest_fpstate(&vcpu->arch.guest_fpu);
