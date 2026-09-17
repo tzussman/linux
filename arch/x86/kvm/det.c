@@ -15,6 +15,17 @@
 #include "pmu.h"
 #include "x86.h"
 
+/*
+ * A fence arms the counter to overflow this many ticks before the target,
+ * then steps with MTF the rest of the way, so the margin must exceed the
+ * PMI skid.  Measured skid on Skylake-SP is at most 24 branches.
+ */
+static unsigned int det_fence_margin = 48;
+module_param(det_fence_margin, uint, 0444);
+
+/* Sampling period while no fence is armed: never reached in practice. */
+#define DET_MAX_PERIOD		BIT_ULL(46)
+
 int kvm_det_enable(struct kvm *kvm, u32 features, u64 tick_event)
 {
 	int r = -EINVAL;
@@ -68,6 +79,7 @@ void kvm_det_vcpu_init(struct kvm_vcpu *vcpu)
 	det->tsc_mult = 1;
 	for (i = 0; i < 4; i++)
 		det->rng[i] = splitmix64(&seed);
+	det->fence_ticks = KVM_X86_DET_FENCE_NONE;
 }
 
 /*
@@ -90,6 +102,16 @@ u64 kvm_det_rand(struct kvm_vcpu *vcpu)
 	return result;
 }
 
+/*
+ * The PMI has already forced a VM-Exit; kvm_det_pre_run() decides before
+ * the next VM-Entry whether to start stepping.  Nothing to do here.
+ */
+static void kvm_det_overflow(struct perf_event *event,
+			     struct perf_sample_data *data,
+			     struct pt_regs *regs)
+{
+}
+
 static struct perf_event *kvm_det_create_event(struct kvm_vcpu *vcpu)
 {
 	struct perf_event_attr attr = {
@@ -99,9 +121,19 @@ static struct perf_event *kvm_det_create_event(struct kvm_vcpu *vcpu)
 		.pinned = true,
 		.exclude_host = true,
 	};
+	perf_overflow_handler_t handler = NULL;
 
-	return perf_event_create_kernel_counter(&attr, -1, current, NULL, vcpu);
+	/* Fences need overflow interrupts, i.e. a sampling event. */
+	if (kvm_det_has(vcpu->kvm, KVM_X86_DET_FENCE)) {
+		attr.sample_period = DET_MAX_PERIOD;
+		handler = kvm_det_overflow;
+	}
+
+	return perf_event_create_kernel_counter(&attr, -1, current, handler,
+						vcpu);
 }
+
+static int kvm_det_arm_fence(struct kvm_vcpu *vcpu);
 
 /*
  * The counter is a task event: it counts only while its thread runs the
@@ -130,7 +162,7 @@ static int kvm_det_bind_event(struct kvm_vcpu *vcpu)
 
 	det->event = event;
 	det->task = current;
-	return 0;
+	return kvm_det_arm_fence(vcpu);
 }
 
 /* Called on every KVM_RUN, before the vCPU is loaded. */
@@ -139,6 +171,7 @@ int kvm_det_vcpu_run(struct kvm_vcpu *vcpu)
 	if (!kvm_det_enabled(vcpu->kvm))
 		return 0;
 
+	vcpu->arch.det.fence_fired = false;
 	return kvm_det_bind_event(vcpu);
 }
 
@@ -214,18 +247,98 @@ void kvm_det_write_tsc(struct kvm_vcpu *vcpu, u64 tsc)
 	det->tsc_base = tsc - kvm_det_ticks(vcpu) * det->tsc_mult;
 }
 
+static void kvm_det_set_stepping(struct kvm_vcpu *vcpu, bool stepping)
+{
+	if (vcpu->arch.det.stepping == stepping)
+		return;
+
+	vcpu->arch.det.stepping = stepping;
+	kvm_x86_call(update_mtf)(vcpu);
+}
+
+static bool kvm_det_fence_armed(struct kvm_vcpu *vcpu)
+{
+	return vcpu->arch.det.fence_ticks != KVM_X86_DET_FENCE_NONE;
+}
+
+/*
+ * Arm the counter to interrupt det_fence_margin ticks before the target,
+ * or start stepping right away if the target is already that close.
+ * Without a fence the period goes back to its idle value.
+ */
+static int kvm_det_arm_fence(struct kvm_vcpu *vcpu)
+{
+	struct kvm_det_vcpu *det = &vcpu->arch.det;
+	u64 period = DET_MAX_PERIOD;
+	bool stepping = false;
+	int r;
+
+	if (kvm_det_fence_armed(vcpu)) {
+		u64 now = kvm_det_ticks(vcpu);
+
+		if (det->fence_ticks - now > det_fence_margin)
+			period = det->fence_ticks - now - det_fence_margin;
+		else
+			stepping = true;
+	}
+
+	if (!kvm_det_has(vcpu->kvm, KVM_X86_DET_FENCE))
+		return 0;
+
+	r = perf_event_period(det->event, period);
+	if (r)
+		return r;
+	kvm_det_set_stepping(vcpu, stepping);
+	return 0;
+}
+
+static int kvm_det_set_fence(struct kvm_vcpu *vcpu,
+			     const struct kvm_x86_det_fence *fence)
+{
+	struct kvm_det_vcpu *det = &vcpu->arch.det;
+	u64 old_ticks = det->fence_ticks, old_insns = det->fence_insns;
+	int r;
+
+	r = kvm_det_bind_event(vcpu);
+	if (r)
+		return r;
+
+	if (fence->ticks != KVM_X86_DET_FENCE_NONE) {
+		u64 now = kvm_det_ticks(vcpu);
+
+		/* A fence in the past cannot fire; one at now fires at the next step. */
+		if (fence->ticks < now)
+			return -EINVAL;
+	}
+
+	det->fence_ticks = fence->ticks;
+	det->fence_insns = fence->insns;
+	r = kvm_det_arm_fence(vcpu);
+	if (r) {
+		det->fence_ticks = old_ticks;
+		det->fence_insns = old_insns;
+	}
+	return r;
+}
+
 /*
  * Called before every VM-Entry.  Returns 0 with the run structure filled
  * in if the counter has stopped (a pinned event that lost its counter is
- * in the error state; a throttled one is stopped), else 1.
+ * in the error state; a throttled one is stopped), else 1.  With a fence
+ * armed, the count may already be past the arming point without the PMI
+ * having been delivered, e.g. when another exit intervened, so decide
+ * from the count rather than from the PMI.
  */
 int kvm_det_pre_run(struct kvm_vcpu *vcpu)
 {
 	struct kvm_det_vcpu *det = &vcpu->arch.det;
 	struct kvm_run *run = vcpu->run;
 
-	if (det->event->state == PERF_EVENT_STATE_ERROR ||
-	    perf_event_is_throttled(det->event))
+	if (kvm_det_fence_armed(vcpu) && !det->stepping &&
+	    kvm_det_ticks(vcpu) + det_fence_margin >= det->fence_ticks)
+		kvm_det_set_stepping(vcpu, true);
+	else if (det->event->state == PERF_EVENT_STATE_ERROR ||
+		 perf_event_is_throttled(det->event))
 		det->error = true;
 
 	if (likely(!det->error))
@@ -235,6 +348,54 @@ int kvm_det_pre_run(struct kvm_vcpu *vcpu)
 	run->internal.suberror = KVM_INTERNAL_ERROR_DET_COUNTER;
 	run->internal.ndata = 0;
 	return 0;
+}
+
+/*
+ * One instruction was stepped, by MTF or by KVM's emulation.  A fence
+ * that fires is only recorded here; kvm_det_complete_exit() turns it
+ * into the exit once the handler of the current exit has run, since that
+ * handler may claim the exit for itself, e.g. HLT.
+ */
+void kvm_det_step(struct kvm_vcpu *vcpu)
+{
+	struct kvm_det_vcpu *det = &vcpu->arch.det;
+	u64 now = kvm_det_ticks(vcpu);
+
+	if (now < det->fence_ticks)
+		return;
+	if (det->fence_insns) {
+		det->fence_insns--;
+		return;
+	}
+
+	det->fence_ticks = KVM_X86_DET_FENCE_NONE;
+	det->fence_fired = true;
+	det->fence_fired_ticks = now;
+	kvm_det_arm_fence(vcpu);
+}
+
+/*
+ * After a handler returned `r`: a fired fence exits to userspace, as the
+ * fence exit if the handler would have re-entered the guest, else under
+ * the handler's own exit reason with KVM_RUN_X86_DET_FENCE set by
+ * post_kvm_run_save().
+ */
+int kvm_det_complete_exit(struct kvm_vcpu *vcpu, int r)
+{
+	struct kvm_det_vcpu *det = &vcpu->arch.det;
+
+	if (likely(!det->fence_fired) || r <= 0)
+		return r;
+
+	vcpu->run->exit_reason = KVM_EXIT_X86_DET_FENCE;
+	vcpu->run->det_fence.ticks = det->fence_fired_ticks;
+	return 0;
+}
+
+void kvm_det_post_run(struct kvm_vcpu *vcpu)
+{
+	if (vcpu->arch.det.fence_fired)
+		vcpu->run->flags |= KVM_RUN_X86_DET_FENCE;
 }
 
 int kvm_det_vcpu_has_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
@@ -250,6 +411,8 @@ int kvm_det_vcpu_has_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 		return kvm_det_has(vcpu->kvm, KVM_X86_DET_TSC) ? 0 : -ENXIO;
 	case KVM_VCPU_DET_RNG_STATE:
 		return kvm_det_has(vcpu->kvm, KVM_X86_DET_RNG) ? 0 : -ENXIO;
+	case KVM_VCPU_DET_FENCE:
+		return kvm_det_has(vcpu->kvm, KVM_X86_DET_FENCE) ? 0 : -ENXIO;
 	default:
 		return -ENXIO;
 	}
@@ -259,6 +422,7 @@ int kvm_det_vcpu_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 {
 	void __user *uaddr = u64_to_user_ptr(attr->addr);
 	struct kvm_det_vcpu *det = &vcpu->arch.det;
+	struct kvm_x86_det_fence fence;
 	u64 val;
 	int r;
 
@@ -278,6 +442,10 @@ int kvm_det_vcpu_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 		break;
 	case KVM_VCPU_DET_RNG_STATE:
 		return copy_to_user(uaddr, det->rng, sizeof(det->rng)) ? -EFAULT : 0;
+	case KVM_VCPU_DET_FENCE:
+		fence.ticks = det->fence_ticks;
+		fence.insns = det->fence_insns;
+		return copy_to_user(uaddr, &fence, sizeof(fence)) ? -EFAULT : 0;
 	default:
 		return -ENXIO;
 	}
@@ -288,6 +456,7 @@ int kvm_det_vcpu_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 {
 	void __user *uaddr = u64_to_user_ptr(attr->addr);
 	struct kvm_det_vcpu *det = &vcpu->arch.det;
+	struct kvm_x86_det_fence fence;
 	u64 rng[4], val;
 	int r;
 
@@ -318,6 +487,10 @@ int kvm_det_vcpu_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 			return -EINVAL;
 		memcpy(det->rng, rng, sizeof(rng));
 		return 0;
+	case KVM_VCPU_DET_FENCE:
+		if (copy_from_user(&fence, uaddr, sizeof(fence)))
+			return -EFAULT;
+		return kvm_det_set_fence(vcpu, &fence);
 	default:
 		return -ENXIO;
 	}

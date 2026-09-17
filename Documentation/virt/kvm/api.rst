@@ -6744,6 +6744,8 @@ affect the device's behavior. Current defined flags::
   #define KVM_RUN_X86_BUS_LOCK     (1 << 1)
   /* x86, set if the VCPU is executing a nested (L2) guest */
   #define KVM_RUN_X86_GUEST_MODE   (1 << 2)
+  /* x86, set if a KVM_CAP_X86_DETERMINISTIC fence fired during this run */
+  #define KVM_RUN_X86_DET_FENCE    (1 << 3)
 
   /* arm64, set for KVM_EXIT_DEBUG */
   #define KVM_DEBUG_ARCH_HSR_HIGH_VALID  (1 << 0)
@@ -7503,6 +7505,20 @@ consisting of the following fields:
 ``gpa`` is set to the faulting IPA from the exception taken to KVM when
 the ``KVM_EXIT_ARM_SEA_FLAG_GPA_VALID`` flag is set. Otherwise, the value of
 ``gpa`` is unknown.
+
+::
+
+		/* KVM_EXIT_X86_DET_FENCE */
+		struct {
+			__u64 ticks;
+		} det_fence;
+
+KVM_EXIT_X86_DET_FENCE indicates that a fence set through the
+KVM_VCPU_DET_FENCE attribute has fired (see KVM_CAP_X86_DETERMINISTIC).
+'ticks' is the vCPU's tick count at the stop; it exceeds the fence's
+target only if KVM could not stop in time.  The fence is disarmed.  When
+another exit reason claims the same exit, KVM_RUN_X86_DET_FENCE is set in
+'flags' instead and this payload is not written.
 
 ::
 
@@ -9088,6 +9104,7 @@ The following features are defined::
   #define KVM_X86_DET_TICKS   (1 << 0)
   #define KVM_X86_DET_TSC     (1 << 1)
   #define KVM_X86_DET_RNG     (1 << 2)
+  #define KVM_X86_DET_FENCE   (1 << 3)
 
 KVM_X86_DET_TICKS gives each vCPU a tick counter: the number of events
 retired in guest mode, counted by a KVM-owned perf event that KVM switches
@@ -9129,17 +9146,35 @@ writable as KVM_VCPU_DET_RNG_STATE (struct kvm_x86_det_rng) so that it
 can be seeded and restored with a snapshot; it starts from a fixed
 function of the vCPU id.
 
+KVM_X86_DET_FENCE lets userspace run the guest to an exact tick count.
+A fence set through KVM_VCPU_DET_FENCE makes KVM_RUN stop with
+KVM_EXIT_X86_DET_FENCE once the tick count has reached the target and the
+requested number of further instructions has executed; the exit reports
+the tick count at the stop, which exceeds the target only if the stop
+was late.  KVM arms the counter's overflow interrupt a margin before the
+target (the kvm.det_fence_margin module parameter, default 48, which
+must exceed the interrupt's skid) and then single-steps with the monitor
+trap flag.  Other exits inside the margin do not disturb the fence; it
+stays armed across returns to userspace until it fires or is disarmed.
+If the fence fires on an instruction whose completion itself exits to
+userspace, e.g. HLT, that exit is reported instead, with
+KVM_RUN_X86_DET_FENCE set in the flags of struct kvm_run; userspace
+should check the flag on every exit and read the tick count through
+KVM_SYNC_X86_DET_TICKS or the attribute.
+
 The vPMU must have been disabled with KVM_PMU_CAP_DISABLE, since a guest
 counter would compete with the tick counter; enabling the capability also
 hides VMX from the guest, since the controls involved are not virtualized
 for nested guests.  The counter is bound to the thread running the vCPU
 and follows the vCPU if another thread takes over.  If the counter stops
 counting, e.g. because the host PMU had no free counter for a pinned
-event, KVM_RUN exits with KVM_EXIT_INTERNAL_ERROR and suberror
-KVM_INTERNAL_ERROR_DET_COUNTER, as the guest's clock cannot be recovered.
-The host must not use the performance counters on the CPUs the vCPU runs
-on (the NMI watchdog included).  Host SMIs count unless the PMU freezes
-in SMM (/sys/devices/cpu/freeze_on_smi).
+event or because the perf sampling rate limit throttled it, KVM_RUN exits
+with KVM_EXIT_INTERNAL_ERROR and suberror KVM_INTERNAL_ERROR_DET_COUNTER,
+as the guest's clock cannot be recovered.  The host must not use the
+performance counters on the CPUs the vCPU runs on (the NMI watchdog
+included), and kernel.perf_event_max_sample_rate must exceed the rate of
+fence interrupts.  Host SMIs count unless the PMU freezes in SMM
+(/sys/devices/cpu/freeze_on_smi).
 
 8. Other capabilities.
 ======================

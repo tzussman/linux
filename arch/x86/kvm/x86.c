@@ -6209,6 +6209,10 @@ int kvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
 
 	kvm_pmu_instruction_retired(vcpu);
 
+	/* The monitor trap flag does not fire for instructions KVM skips. */
+	if (unlikely(kvm_det_stepping(vcpu)))
+		kvm_det_step(vcpu);
+
 	/*
 	 * rflags is the old, "raw" value of the flags.  The new value has
 	 * not been saved yet.
@@ -6558,6 +6562,8 @@ writeback:
 			if (ctxt->is_branch)
 				kvm_pmu_branch_retired(vcpu);
 			kvm_rip_write(vcpu, ctxt->eip);
+			if (r && unlikely(kvm_det_stepping(vcpu)))
+				kvm_det_step(vcpu);
 			if (r && (ctxt->tf || (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP)))
 				r = kvm_inject_emulated_db(vcpu, DR6_BS);
 			kvm_x86_call(update_emulated_instruction)(vcpu);
@@ -7528,6 +7534,7 @@ static void post_kvm_run_save(struct kvm_vcpu *vcpu)
 
 	if (is_smm(vcpu))
 		kvm_run->flags |= KVM_RUN_X86_SMM;
+	kvm_det_post_run(vcpu);
 	if (is_guest_mode(vcpu))
 		kvm_run->flags |= KVM_RUN_X86_GUEST_MODE;
 }
@@ -8525,6 +8532,8 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		kvm_lapic_sync_from_vapic(vcpu);
 
 	r = kvm_x86_call(handle_exit)(vcpu, exit_fastpath);
+	if (unlikely(kvm_det_enabled(vcpu->kvm)))
+		r = kvm_det_complete_exit(vcpu, r);
 	return r;
 
 cancel_injection:
@@ -9007,6 +9016,8 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 		int (*cui)(struct kvm_vcpu *) = vcpu->arch.complete_userspace_io;
 		vcpu->arch.complete_userspace_io = NULL;
 		r = cui(vcpu);
+		if (unlikely(kvm_det_enabled(vcpu->kvm)))
+			r = kvm_det_complete_exit(vcpu, r);
 		if (r <= 0)
 			goto out;
 	} else {

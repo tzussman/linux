@@ -366,3 +366,26 @@ Returns:
 
 The state of the generator that serves the guest's RDRAND and RDSEED.
 Each instruction draws one 64-bit output, truncated to the operand size.
+
+8.5 ATTRIBUTE: KVM_VCPU_DET_FENCE
+
+:Parameters: struct kvm_x86_det_fence
+
+Returns:
+
+	 ======= ======================================
+	 -EFAULT Error reading/writing the provided
+		 parameter address.
+	 -EINVAL ticks is in the past
+	 -ENXIO  Attribute not supported, or
+		 KVM_X86_DET_FENCE not enabled
+	 ======= ======================================
+
+Sets or reads the pending fence: KVM_RUN exits with
+KVM_EXIT_X86_DET_FENCE when the tick count reaches ``ticks`` and
+``insns`` further instructions have executed.  A ``ticks`` value of
+KVM_X86_DET_FENCE_NONE disarms the fence and is what a read returns
+when none is pending.  A fence at the current count fires at the next
+instruction boundary.  Instructions delivered as events (an injected
+interrupt lands before the first instruction of its handler) count as
+one instruction each.

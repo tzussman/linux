@@ -112,6 +112,7 @@ struct kvm_ioapic_state {
 #define KVM_RUN_X86_SMM		 (1 << 0)
 #define KVM_RUN_X86_BUS_LOCK     (1 << 1)
 #define KVM_RUN_X86_GUEST_MODE   (1 << 2)
+#define KVM_RUN_X86_DET_FENCE    (1 << 3)
 
 /* for KVM_GET_REGS and KVM_SET_REGS */
 struct kvm_regs {
@@ -969,16 +970,28 @@ struct kvm_hyperv_eventfd {
 #define   KVM_VCPU_DET_TSC_BASE 1 /* virtual TSC at tick 0 */
 #define   KVM_VCPU_DET_TSC_MULT 2 /* virtual TSC cycles per tick */
 #define   KVM_VCPU_DET_RNG_STATE 3 /* struct kvm_x86_det_rng */
+#define   KVM_VCPU_DET_FENCE 4 /* struct kvm_x86_det_fence */
 
 /* Features for KVM_CAP_X86_DETERMINISTIC. */
 #define KVM_X86_DET_TICKS	_BITULL(0)
 #define KVM_X86_DET_TSC		_BITULL(1)
 #define KVM_X86_DET_RNG		_BITULL(2)
+#define KVM_X86_DET_FENCE	_BITULL(3)
 
 /* xoshiro256** state serving RDRAND and RDSEED under KVM_X86_DET_RNG */
 struct kvm_x86_det_rng {
 	__u64 s[4];
 };
+
+/*
+ * Run until the tick count reaches `ticks`, then `insns` more instructions,
+ * and exit with KVM_EXIT_X86_DET_FENCE.  ticks == -1 disarms.
+ */
+struct kvm_x86_det_fence {
+	__u64 ticks;
+	__u64 insns;
+};
+#define KVM_X86_DET_FENCE_NONE	(~0ULL)
 
 /* x86-specific KVM_EXIT_HYPERCALL flags. */
 #define KVM_EXIT_HYPERCALL_LONG_MODE	_BITULL(0)

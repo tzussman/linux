@@ -737,6 +737,13 @@ struct kvm_det_vcpu {
 
 	/* KVM_X86_DET_RNG: xoshiro256** state behind RDRAND and RDSEED */
 	u64 rng[4];
+
+	/* KVM_X86_DET_FENCE: stop exactly at fence_ticks plus fence_insns */
+	u64 fence_ticks;
+	u64 fence_insns;
+	bool stepping;
+	bool fence_fired;
+	u64 fence_fired_ticks;
 };
 
 struct kvm_vcpu_arch {

@@ -901,8 +901,8 @@ static u32 vmx_read_guest_seg_ar(struct vcpu_vmx *vmx, unsigned seg)
 }
 
 /*
- * Guest debug single-steps L1 with MTF.  vmcs02 takes its MTF from
- * vmcs12, so leave it alone while L2 is active.
+ * Guest debug and tick fences single-step L1 with MTF.  vmcs02 takes its
+ * MTF from vmcs12, so leave it alone while L2 is active.
  */
 void vmx_update_mtf(struct kvm_vcpu *vcpu)
 {
@@ -910,7 +910,8 @@ void vmx_update_mtf(struct kvm_vcpu *vcpu)
 		return;
 
 	exec_controls_changebit(to_vmx(vcpu), CPU_BASED_MONITOR_TRAP_FLAG,
-				kvm_singlestep_uses_mtf(vcpu));
+				kvm_singlestep_uses_mtf(vcpu) ||
+				kvm_det_stepping(vcpu));
 }
 
 void vmx_update_exception_bitmap(struct kvm_vcpu *vcpu)
@@ -6162,6 +6163,12 @@ static int handle_monitor_trap(struct kvm_vcpu *vcpu)
 {
 	struct kvm_run *kvm_run = vcpu->run;
 
+	if (kvm_det_stepping(vcpu)) {
+		kvm_det_step(vcpu);
+		if (!kvm_det_complete_exit(vcpu, 1))
+			return 0;
+	}
+
 	if (!kvm_singlestep_uses_mtf(vcpu))
 		return 1;
 
@@ -8127,6 +8134,8 @@ static __init u32 vmx_det_features(void)
 		features |= KVM_X86_DET_TSC;
 	if (cpu_has_vmx_rdrand() && cpu_has_vmx_rdseed())
 		features |= KVM_X86_DET_RNG;
+	if (vmcs_config.cpu_based_exec_ctrl & CPU_BASED_MONITOR_TRAP_FLAG)
+		features |= KVM_X86_DET_FENCE;
 
 	return features;
 }
