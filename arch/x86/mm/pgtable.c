@@ -441,6 +441,8 @@ bool ptep_test_and_clear_young(struct vm_area_struct *vma,
 		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
 					 (unsigned long *) &ptep->pte);
 
+	if (ret && IS_ENABLED(CONFIG_X86_FLUSH_TLB_ON_CLEAR_YOUNG))
+		flush_tlb_page(vma, addr);
 	return ret;
 }
 
@@ -454,6 +456,8 @@ bool pmdp_test_and_clear_young(struct vm_area_struct *vma,
 		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
 					 (unsigned long *)pmdp);
 
+	if (ret && IS_ENABLED(CONFIG_X86_FLUSH_TLB_ON_CLEAR_YOUNG))
+		flush_tlb_range(vma, addr, addr + PMD_SIZE);
 	return ret;
 }
 #endif
@@ -468,6 +472,8 @@ bool pudp_test_and_clear_young(struct vm_area_struct *vma,
 		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
 					 (unsigned long *)pudp);
 
+	if (ret && IS_ENABLED(CONFIG_X86_FLUSH_TLB_ON_CLEAR_YOUNG))
+		flush_tlb_range(vma, addr, addr + PUD_SIZE);
 	return ret;
 }
 #endif
@@ -501,7 +507,7 @@ bool pmdp_clear_flush_young(struct vm_area_struct *vma,
 
 	young = pmdp_test_and_clear_young(vma, address, pmdp);
 	if (young)
-		flush_tlb_range(vma, address, address + HPAGE_PMD_SIZE);
+		flush_tlb_range(vma, address, address + PMD_SIZE);
 
 	return young;
 }
@@ -526,7 +532,7 @@ pud_t pudp_invalidate(struct vm_area_struct *vma, unsigned long address,
 {
 	VM_WARN_ON_ONCE(!pud_present(*pudp));
 	pud_t old = pudp_establish(vma, address, pudp, pud_mkinvalid(*pudp));
-	flush_pud_tlb_range(vma, address, address + HPAGE_PUD_SIZE);
+	flush_pud_tlb_range(vma, address, address + PUD_SIZE);
 	return old;
 }
 #endif

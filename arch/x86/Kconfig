@@ -1467,6 +1467,18 @@ config X86_PAE
 	  has the cost of more pagetable lookup overhead, and also
 	  consumes more pagetable space per process.
 
+config X86_FLUSH_TLB_ON_CLEAR_YOUNG
+	bool "Flush the TLB when clearing page-table accessed bits"
+	depends on X86_64
+	help
+	  Linux clears accessed bits without invalidating the TLB entry, so
+	  whether a subsequent access sets the bit again depends on whether
+	  the translation was still cached, which is not a function of the
+	  program's execution.  Flushing on every clear makes page aging a
+	  deterministic function of the accesses that follow it, at the cost
+	  of one TLB invalidation per cleared entry.  Select this for
+	  deterministic-execution guests only.
+
 config X86_DIRECT_GBPAGES
 	def_bool y
 	depends on X86_64
