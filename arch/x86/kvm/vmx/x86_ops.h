@@ -56,6 +56,7 @@ bool vmx_has_emulated_msr(struct kvm *kvm, u32 index);
 void vmx_recalc_intercepts(struct kvm_vcpu *vcpu);
 void vmx_prepare_switch_to_guest(struct kvm_vcpu *vcpu);
 void vmx_update_exception_bitmap(struct kvm_vcpu *vcpu);
+void vmx_update_mtf(struct kvm_vcpu *vcpu);
 int vmx_get_feature_msr(u32 msr, u64 *data);
 int vmx_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info);
 #define vmx_complete_emulated_msr kvm_complete_insn_gp

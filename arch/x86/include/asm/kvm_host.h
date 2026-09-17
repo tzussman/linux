@@ -281,6 +281,8 @@ struct kvm_caps {
 
 	/* KVM_CAP_X86_DETERMINISTIC features */
 	u32 supported_det_features;
+	/* monitor trap flag single-step supported? */
+	bool has_mtf;
 };
 extern struct kvm_caps kvm_caps;
 
@@ -1566,6 +1568,8 @@ struct kvm_x86_ops {
 	const u64 HOST_OWNED_DEBUGCTL;
 
 	void (*update_exception_bitmap)(struct kvm_vcpu *vcpu);
+	/* Sync the monitor trap flag with the guest-debug and fence state. */
+	void (*update_mtf)(struct kvm_vcpu *vcpu);
 	int (*get_msr)(struct kvm_vcpu *vcpu, struct msr_data *msr);
 	int (*set_msr)(struct kvm_vcpu *vcpu, struct msr_data *msr);
 	u64 (*get_segment_base)(struct kvm_vcpu *vcpu, int seg);

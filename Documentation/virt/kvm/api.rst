@@ -3774,6 +3774,16 @@ flags which can include the following:
   - KVM_GUESTDBG_INJECT_BP:     inject BP type exception [x86]
   - KVM_GUESTDBG_EXIT_PENDING:  trigger an immediate guest exit [s390]
   - KVM_GUESTDBG_BLOCKIRQ:      avoid injecting interrupts/NMI/SMI [x86]
+  - KVM_GUESTDBG_USE_MTF:       single-step with the monitor trap flag [x86]
+
+KVM_GUESTDBG_USE_MTF modifies KVM_GUESTDBG_SINGLESTEP: instead of
+injecting RFLAGS.TF, which the guest can observe with PUSHF and which
+interacts with the guest's own use of TF and debug registers, KVM uses
+the VMX monitor trap flag.  The exits look the same (KVM_EXIT_DEBUG with
+DR6.BS).  MTF fires after event delivery without an instruction having
+executed, so a step may make no progress.  Only offered when
+KVM_CAP_SET_GUEST_DEBUG2 reports the flag, and only valid together with
+KVM_GUESTDBG_SINGLESTEP.
 
 For example KVM_GUESTDBG_USE_SW_BP indicates that software breakpoints
 are enabled in memory so we need to ensure breakpoint exceptions are

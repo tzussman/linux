@@ -339,6 +339,14 @@ static void vt_update_exception_bitmap(struct kvm_vcpu *vcpu)
 	vmx_update_exception_bitmap(vcpu);
 }
 
+static void vt_update_mtf(struct kvm_vcpu *vcpu)
+{
+	if (is_td_vcpu(vcpu))
+		return;
+
+	vmx_update_mtf(vcpu);
+}
+
 static u64 vt_get_segment_base(struct kvm_vcpu *vcpu, int seg)
 {
 	if (is_td_vcpu(vcpu))
@@ -916,6 +924,7 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 	.HOST_OWNED_DEBUGCTL = VMX_HOST_OWNED_DEBUGCTL_BITS,
 
 	.update_exception_bitmap = vt_op(update_exception_bitmap),
+	.update_mtf = vt_op(update_mtf),
 	.get_feature_msr = vmx_get_feature_msr,
 	.get_msr = vt_op(get_msr),
 	.set_msr = vt_op(set_msr),

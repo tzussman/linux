@@ -743,6 +743,13 @@ static inline void kvm_disable_exits(struct kvm *kvm, u64 mask)
 	kvm->arch.disabled_exits |= mask;
 }
 
+/* Single-step with the monitor trap flag rather than by injecting RFLAGS.TF. */
+static inline bool kvm_singlestep_uses_mtf(struct kvm_vcpu *vcpu)
+{
+	return (vcpu->guest_debug & (KVM_GUESTDBG_SINGLESTEP | KVM_GUESTDBG_USE_MTF)) ==
+	       (KVM_GUESTDBG_SINGLESTEP | KVM_GUESTDBG_USE_MTF);
+}
+
 static inline bool kvm_mwait_in_guest(struct kvm *kvm)
 {
 	return kvm->arch.disabled_exits & KVM_X86_DISABLE_EXITS_MWAIT;

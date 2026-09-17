@@ -900,6 +900,19 @@ static u32 vmx_read_guest_seg_ar(struct vcpu_vmx *vmx, unsigned seg)
 	return *p;
 }
 
+/*
+ * Guest debug single-steps L1 with MTF.  vmcs02 takes its MTF from
+ * vmcs12, so leave it alone while L2 is active.
+ */
+void vmx_update_mtf(struct kvm_vcpu *vcpu)
+{
+	if (is_guest_mode(vcpu))
+		return;
+
+	exec_controls_changebit(to_vmx(vcpu), CPU_BASED_MONITOR_TRAP_FLAG,
+				kvm_singlestep_uses_mtf(vcpu));
+}
+
 void vmx_update_exception_bitmap(struct kvm_vcpu *vcpu)
 {
 	u32 eb;
@@ -6147,7 +6160,17 @@ static int handle_pause(struct kvm_vcpu *vcpu)
 
 static int handle_monitor_trap(struct kvm_vcpu *vcpu)
 {
-	return 1;
+	struct kvm_run *kvm_run = vcpu->run;
+
+	if (!kvm_singlestep_uses_mtf(vcpu))
+		return 1;
+
+	kvm_run->debug.arch.dr6 = DR6_BS | DR6_ACTIVE_LOW;
+	kvm_run->debug.arch.dr7 = vmcs_readl(GUEST_DR7);
+	kvm_run->debug.arch.pc = kvm_get_linear_rip(vcpu);
+	kvm_run->debug.arch.exception = DB_VECTOR;
+	kvm_run->exit_reason = KVM_EXIT_DEBUG;
+	return 0;
 }
 
 /* RDTSC exits only when the VM has a deterministic TSC. */
@@ -7631,7 +7654,8 @@ fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
 	 * vmentry fails as it then expects bit 14 (BS) in pending debug
 	 * exceptions being set, but that's not correct for the guest debugging
 	 * case. */
-	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP)
+	if ((vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP) &&
+	    !kvm_singlestep_uses_mtf(vcpu))
 		vmx_set_interrupt_shadow(vcpu, 0);
 
 	pt_guest_enter(vmx);
@@ -8862,6 +8886,7 @@ __init int vmx_hardware_setup(void)
 	kvm_caps.has_bus_lock_exit = cpu_has_vmx_bus_lock_detection();
 	kvm_caps.has_notify_vmexit = cpu_has_notify_vmexit();
 	kvm_caps.supported_det_features = vmx_det_features();
+	kvm_caps.has_mtf = vmcs_config.cpu_based_exec_ctrl & CPU_BASED_MONITOR_TRAP_FLAG;
 
 	set_bit(0, vmx_vpid_bitmap); /* 0 is reserved for host */
 

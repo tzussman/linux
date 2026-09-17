@@ -78,6 +78,7 @@ TEST_GEN_PROGS_x86 += x86/det_tsc_test
 TEST_GEN_PROGS_x86 += x86/det_rng_test
 TEST_GEN_PROGS_x86 += x86/det_counter_loss_test
 TEST_GEN_PROGS_x86 += x86/det_nested_test
+TEST_GEN_PROGS_x86 += x86/mtf_singlestep_test
 TEST_GEN_PROGS_x86 += x86/dirty_log_page_splitting_test
 TEST_GEN_PROGS_x86 += x86/feature_msrs_test
 TEST_GEN_PROGS_x86 += x86/evmcs_smm_controls_test

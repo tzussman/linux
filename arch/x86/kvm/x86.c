@@ -2299,7 +2299,10 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 		r = kvm_caps.supported_det_features;
 		break;
 	case KVM_CAP_SET_GUEST_DEBUG2:
-		return KVM_GUESTDBG_VALID_MASK;
+		r = KVM_GUESTDBG_VALID_MASK;
+		if (kvm_caps.has_mtf)
+			r |= KVM_GUESTDBG_USE_MTF;
+		break;
 #ifdef CONFIG_KVM_XEN
 	case KVM_CAP_XEN_HVM:
 		r = KVM_XEN_HVM_CONFIG_HYPERCALL_MSR |
@@ -6213,8 +6216,10 @@ int kvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
 	 * This is correct even for TF set by the guest, because "the
 	 * processor will not generate this exception after the instruction
 	 * that sets the TF flag".
+	 *
+	 * Likewise report the step for MTF-based single-stepping.
 	 */
-	if (unlikely(rflags & X86_EFLAGS_TF))
+	if (unlikely((rflags & X86_EFLAGS_TF) || kvm_singlestep_uses_mtf(vcpu)))
 		r = kvm_inject_emulated_db(vcpu, DR6_BS);
 	return r;
 }
@@ -9181,6 +9186,10 @@ int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
 	if (vcpu->arch.guest_state_protected)
 		return -EINVAL;
 
+	if ((dbg->control & KVM_GUESTDBG_USE_MTF) &&
+	    (!kvm_caps.has_mtf || !(dbg->control & KVM_GUESTDBG_SINGLESTEP)))
+		return -EINVAL;
+
 	vcpu_load(vcpu);
 
 	if (dbg->control & (KVM_GUESTDBG_INJECT_DB | KVM_GUESTDBG_INJECT_BP)) {
@@ -9223,6 +9232,7 @@ int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
 	kvm_set_rflags(vcpu, rflags);
 
 	kvm_x86_call(update_exception_bitmap)(vcpu);
+	kvm_x86_call(update_mtf)(vcpu);
 
 	kvm_arch_vcpu_guestdbg_update_apicv_inhibit(vcpu->kvm);
 
