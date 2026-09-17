@@ -2777,6 +2777,20 @@ static void perf_event_unthrottle(struct perf_event *event, bool start)
 		perf_log_throttle(event, 1);
 }
 
+/**
+ * perf_event_is_throttled - whether the sampling rate limit stopped an event
+ * @event: the event, active on this CPU or task
+ *
+ * A throttled event stays active but does not count until the next tick
+ * unthrottles it.  Lets a kernel user that relies on an exact count, e.g.
+ * KVM's deterministic tick counter, detect that ticks were lost.
+ */
+bool perf_event_is_throttled(struct perf_event *event)
+{
+	return event->hw.interrupts == MAX_INTERRUPTS;
+}
+EXPORT_SYMBOL_GPL(perf_event_is_throttled);
+
 static void perf_event_throttle(struct perf_event *event)
 {
 	if (event->state != PERF_EVENT_STATE_ACTIVE)
