@@ -450,11 +450,13 @@ struct kvm_xcrs {
 #define KVM_SYNC_X86_REGS      (1UL << 0)
 #define KVM_SYNC_X86_SREGS     (1UL << 1)
 #define KVM_SYNC_X86_EVENTS    (1UL << 2)
+#define KVM_SYNC_X86_DET_TICKS (1UL << 3)
 
 #define KVM_SYNC_X86_VALID_FIELDS \
 	(KVM_SYNC_X86_REGS| \
 	 KVM_SYNC_X86_SREGS| \
-	 KVM_SYNC_X86_EVENTS)
+	 KVM_SYNC_X86_EVENTS| \
+	 KVM_SYNC_X86_DET_TICKS)
 
 /* kvm_sync_regs struct included by kvm_run struct */
 struct kvm_sync_regs {
@@ -466,6 +468,8 @@ struct kvm_sync_regs {
 	struct kvm_regs regs;
 	struct kvm_sregs sregs;
 	struct kvm_vcpu_events events;
+	/* KVM_CAP_X86_DETERMINISTIC tick count, see KVM_VCPU_DET_TICKS */
+	__u64 det_ticks;
 };
 
 #define KVM_X86_QUIRK_LINT0_REENABLED		(1 << 0)

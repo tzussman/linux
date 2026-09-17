@@ -103,8 +103,11 @@ int main(int argc, char *argv[])
 
 	run_to_sync(vcpu, 0);
 	t0 = get_ticks(vcpu);
+	vcpu->run->kvm_valid_regs = KVM_SYNC_X86_DET_TICKS;
 	run_to_sync(vcpu, 1);
 	t1 = get_ticks(vcpu);
+	TEST_ASSERT_EQ(vcpu->run->s.regs.det_ticks, t1);
+	vcpu->run->kvm_valid_regs = 0;
 	run_to_sync(vcpu, 2);
 	t2 = get_ticks(vcpu);
 	TEST_ASSERT(t1 - t0 >= LOOP_ITERS && (t2 - t1) - (t1 - t0) == LOOP_ITERS,

@@ -9338,6 +9338,9 @@ static void store_regs(struct kvm_vcpu *vcpu)
 	if (vcpu->run->kvm_valid_regs & KVM_SYNC_X86_EVENTS)
 		kvm_vcpu_ioctl_x86_get_vcpu_events(
 				vcpu, &vcpu->run->s.regs.events);
+
+	if (vcpu->run->kvm_valid_regs & KVM_SYNC_X86_DET_TICKS)
+		vcpu->run->s.regs.det_ticks = kvm_det_ticks(vcpu);
 }
 
 static int sync_regs(struct kvm_vcpu *vcpu)
@@ -9352,6 +9355,12 @@ static int sync_regs(struct kvm_vcpu *vcpu)
 			return -EINVAL;
 
 		vcpu->run->kvm_dirty_regs &= ~KVM_SYNC_X86_EVENTS;
+	}
+
+	if (vcpu->run->kvm_dirty_regs & KVM_SYNC_X86_DET_TICKS) {
+		if (kvm_det_set_ticks(vcpu, vcpu->run->s.regs.det_ticks))
+			return -EINVAL;
+		vcpu->run->kvm_dirty_regs &= ~KVM_SYNC_X86_DET_TICKS;
 	}
 
 	return 0;

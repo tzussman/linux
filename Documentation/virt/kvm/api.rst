@@ -7829,6 +7829,10 @@ For x86:
 - the register sets to be copied out to kvm_run are selectable
   by userspace (rather that all sets being copied out for every exit).
 - vcpu_events are available in addition to regs and sregs.
+- KVM_SYNC_X86_DET_TICKS copies the KVM_CAP_X86_DETERMINISTIC tick count
+  (see KVM_VCPU_DET_TICKS) into 'det_ticks' on every exit, and sets it
+  when dirty, exactly as a write of the attribute would (writing back
+  the value read is harmless); it reads as zero without the capability.
 
 For x86, the 'kvm_valid_regs' field of struct kvm_run is overloaded to
 function as an input bit-array field set by userspace to indicate the
