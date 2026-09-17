@@ -4801,6 +4801,10 @@ static u32 vmx_secondary_exec_control(struct vcpu_vmx *vmx)
 		exec_control &= ~SECONDARY_EXEC_UNRESTRICTED_GUEST;
 	if (kvm_pause_in_guest(vmx->vcpu.kvm))
 		exec_control &= ~SECONDARY_EXEC_PAUSE_LOOP_EXITING;
+	/* PAUSE-loop exits are keyed to host time; for a deterministic VM
+	 * they are transparent to the guest but pure overhead. */
+	if (kvm_det_enabled(vmx->vcpu.kvm))
+		exec_control &= ~SECONDARY_EXEC_PAUSE_LOOP_EXITING;
 	if (!kvm_vcpu_apicv_active(vcpu))
 		exec_control &= ~(SECONDARY_EXEC_APIC_REGISTER_VIRT |
 				  SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY);

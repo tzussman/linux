@@ -9164,6 +9164,7 @@ KVM_SYNC_X86_DET_TICKS or the attribute.
 
 The vPMU must have been disabled with KVM_PMU_CAP_DISABLE, since a guest
 counter would compete with the tick counter; enabling the capability also
+disables pause-loop exiting, whose window is measured in host time, and
 hides VMX from the guest, since the controls involved are not virtualized
 for nested guests.  The counter is bound to the thread running the vCPU
 and follows the vCPU if another thread takes over.  If the counter stops
