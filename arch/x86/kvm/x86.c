@@ -8411,6 +8411,12 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		if (likely(exit_fastpath != EXIT_FASTPATH_REENTER_GUEST))
 			break;
 
+		/* A fence needs kvm_det_pre_run() before every entry. */
+		if (unlikely(kvm_det_enabled(vcpu->kvm)) && !kvm_det_pre_run(vcpu)) {
+			exit_fastpath = EXIT_FASTPATH_EXIT_USERSPACE;
+			break;
+		}
+
 		if (kvm_lapic_enabled(vcpu))
 			kvm_x86_call(sync_pir_to_irr)(vcpu);
 

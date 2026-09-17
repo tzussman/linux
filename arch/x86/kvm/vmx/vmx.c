@@ -6203,6 +6203,34 @@ static int handle_rdtscp(struct kvm_vcpu *vcpu)
 }
 
 /*
+ * A guest kernel with a virtual TSC reads it constantly.  The handler
+ * only touches registers and the tick counter, so it can run in the
+ * fastpath; a queued #DB from guest single-stepping is caught by the
+ * pending-request check before re-entry.
+ */
+static fastpath_t handle_fastpath_rdtsc(struct kvm_vcpu *vcpu)
+{
+	if (!kvm_det_has(vcpu->kvm, KVM_X86_DET_TSC) ||
+	    !kvm_pmu_is_fastpath_emulation_allowed(vcpu))
+		return EXIT_FASTPATH_NONE;
+
+	return kvm_det_complete_exit(vcpu, handle_rdtsc(vcpu)) ?
+	       EXIT_FASTPATH_REENTER_GUEST : EXIT_FASTPATH_EXIT_USERSPACE;
+}
+
+/* Fence stepping: one MTF exit per instruction, nothing else to do. */
+static fastpath_t handle_fastpath_monitor_trap(struct kvm_vcpu *vcpu)
+{
+	if (!kvm_det_stepping(vcpu) || kvm_singlestep_uses_mtf(vcpu) ||
+	    !kvm_pmu_is_fastpath_emulation_allowed(vcpu))
+		return EXIT_FASTPATH_NONE;
+
+	kvm_det_step(vcpu);
+	return kvm_det_complete_exit(vcpu, 1) ? EXIT_FASTPATH_REENTER_GUEST :
+						EXIT_FASTPATH_EXIT_USERSPACE;
+}
+
+/*
  * RDRAND and RDSEED exit only when the VM has a deterministic RNG.  The
  * destination register and operand size come from the instruction
  * information field; the result always "succeeds" with CF=1.
@@ -7532,6 +7560,10 @@ static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu *vcpu,
 		return handle_fastpath_hlt(vcpu);
 	case EXIT_REASON_INVD:
 		return handle_fastpath_invd(vcpu);
+	case EXIT_REASON_RDTSC:
+		return handle_fastpath_rdtsc(vcpu);
+	case EXIT_REASON_MONITOR_TRAP_FLAG:
+		return handle_fastpath_monitor_trap(vcpu);
 	default:
 		return EXIT_FASTPATH_NONE;
 	}
