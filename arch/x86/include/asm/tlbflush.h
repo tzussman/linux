@@ -352,6 +352,7 @@ static inline void flush_tlb_page(struct vm_area_struct *vma, unsigned long a)
 	flush_tlb_mm_range(vma->vm_mm, a, a + PAGE_SIZE, PAGE_SHIFT, false);
 }
 
+#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
 static inline bool arch_tlbbatch_should_defer(struct mm_struct *mm)
 {
 	bool should_defer = false;
@@ -363,6 +364,7 @@ static inline bool arch_tlbbatch_should_defer(struct mm_struct *mm)
 
 	return should_defer;
 }
+#endif /* CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH */
 
 static inline u64 inc_mm_tlb_gen(struct mm_struct *mm)
 {
@@ -375,6 +377,7 @@ static inline u64 inc_mm_tlb_gen(struct mm_struct *mm)
 	return atomic64_inc_return(&mm->context.tlb_gen);
 }
 
+#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
 static inline void arch_tlbbatch_add_pending(struct arch_tlbflush_unmap_batch *batch,
 		struct mm_struct *mm, unsigned long start, unsigned long end)
 {
@@ -385,6 +388,7 @@ static inline void arch_tlbbatch_add_pending(struct arch_tlbflush_unmap_batch *b
 }
 
 extern void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch);
+#endif /* CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH */
 
 static inline bool pte_flags_need_flush(unsigned long oldflags,
 					unsigned long newflags,

@@ -140,7 +140,7 @@ config X86
 	select ARCH_USE_QUEUED_RWLOCKS
 	select ARCH_USE_QUEUED_SPINLOCKS
 	select ARCH_USE_SYM_ANNOTATIONS
-	select ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
+	select ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH	if X86_BATCHED_UNMAP_TLB_FLUSH
 	select ARCH_WANT_DEFAULT_BPF_JIT	if X86_64
 	select ARCH_WANTS_CLOCKSOURCE_READ_INLINE	if X86_64
 	select ARCH_WANTS_DYNAMIC_TASK_STRUCT
@@ -1466,6 +1466,18 @@ config X86_PAE
 	  larger swapspace support for non-overcommit purposes. It
 	  has the cost of more pagetable lookup overhead, and also
 	  consumes more pagetable space per process.
+
+config X86_BATCHED_UNMAP_TLB_FLUSH
+	bool "Batch the TLB flush of pages unmapped by reclaim" if EXPERT
+	default y
+	help
+	  Reclaim can defer the TLB invalidation of a page it has unmapped
+	  until the end of a batch of unmappings, so that one flush covers
+	  many pages.  Until that flush, whether an access to such a page
+	  faults depends on whether its translation is still cached, which is
+	  microarchitectural state rather than a function of the executed
+	  program.  Say N to invalidate each entry as it is unmapped; this is
+	  slower and is only of interest to deterministic-execution guests.
 
 config X86_FLUSH_TLB_ON_CLEAR_YOUNG
 	bool "Flush the TLB when clearing page-table accessed bits"

@@ -1679,6 +1679,7 @@ void __flush_tlb_all(void)
 }
 EXPORT_SYMBOL_FOR_KVM(__flush_tlb_all);
 
+#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
 void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
 {
 	struct flush_tlb_info info;
@@ -1711,6 +1712,7 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
 
 	cpumask_clear(&batch->cpumask);
 }
+#endif /* CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH */
 
 /*
  * Blindly accessing user memory from NMI context can be dangerous
