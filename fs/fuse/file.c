@@ -1575,7 +1575,7 @@ static int fuse_get_user_pages(struct fuse_args_pages *ap, struct iov_iter *ii,
 
 	/* Special case for kernel I/O: can copy directly into the buffer.
 	 * However if the implementation of fuse_conn requires pages instead of
-	 * pointer (e.g., virtio-fs), use iov_iter_extract_pages() instead.
+	 * pointer (e.g., virtio-fs), use iov_iter_extract_bvecs() instead.
 	 */
 	if (iov_iter_is_kvec(ii)) {
 		void *user_addr = (void *)fuse_get_user_addr(ii);
@@ -1600,49 +1600,45 @@ static int fuse_get_user_pages(struct fuse_args_pages *ap, struct iov_iter *ii,
 	}
 
 	/*
-	 * Until there is support for iov_iter_extract_folios(), we have to
-	 * manually extract pages using iov_iter_extract_pages() and then
-	 * copy that to a folios array.
+	 * iov_iter_extract_bvecs() returns the contiguous pages of a folio as
+	 * a single bvec, so each bvec becomes one range of a folio.
 	 */
-	struct page **pages = kcalloc(max_pages, sizeof(struct page *),
-				      GFP_KERNEL);
-	if (!pages) {
+	struct bio_vec *bvecs = kcalloc(max_pages, sizeof(*bvecs), GFP_KERNEL);
+	unsigned short nr_bvecs = 0, i = 0;
+
+	if (!bvecs) {
 		ret = -ENOMEM;
 		goto out;
 	}
 
 	while (nbytes < *nbytesp && nr_pages < max_pages) {
-		unsigned nfolios, i;
-		size_t start;
-
-		ret = iov_iter_extract_pages(ii, &pages,
-					     *nbytesp - nbytes,
-					     max_pages - nr_pages,
-					     0, &start);
-		if (ret < 0)
+		/*
+		 * Limit the extraction to the pages left, as a request may
+		 * not carry more than max_pages pages.
+		 */
+		ret = iov_iter_extract_bvecs(ii, bvecs, *nbytesp - nbytes,
+					     &nr_bvecs,
+					     nr_bvecs + max_pages - nr_pages,
+					     0, 0);
+		if (ret <= 0)
 			break;
 
 		nbytes += ret;
 
-		nfolios = DIV_ROUND_UP(ret + start, PAGE_SIZE);
+		for (; i < nr_bvecs; i++) {
+			struct bio_vec *bv = &bvecs[i];
+			struct folio *folio = page_folio(bv->bv_page);
 
-		for (i = 0; i < nfolios; i++) {
-			struct folio *folio = page_folio(pages[i]);
-			unsigned int offset = start +
-				(folio_page_idx(folio, pages[i]) << PAGE_SHIFT);
-			unsigned int len = umin(ret, PAGE_SIZE - start);
-
-			ap->descs[ap->num_folios].offset = offset;
-			ap->descs[ap->num_folios].length = len;
+			ap->descs[ap->num_folios].offset = bv->bv_offset +
+				(folio_page_idx(folio, bv->bv_page) << PAGE_SHIFT);
+			ap->descs[ap->num_folios].length = bv->bv_len;
 			ap->folios[ap->num_folios] = folio;
-			start = 0;
-			ret -= len;
 			ap->num_folios++;
+			nr_pages += DIV_ROUND_UP(bv->bv_offset + bv->bv_len,
+						 PAGE_SIZE);
 		}
-
-		nr_pages += nfolios;
 	}
-	kfree(pages);
+	kfree(bvecs);
 
 	if (write && flush_or_invalidate)
 		flush_kernel_vmap_range(ap->args.vmap_base, nbytes);
