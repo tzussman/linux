@@ -1000,7 +1000,7 @@ void fuse_copy_init(struct fuse_copy_state *cs, bool write,
 	cs->iter = iter;
 }
 
-/* Unmap and put previous page of userspace buffer */
+/* Unmap and release previous page of userspace buffer */
 void fuse_copy_finish(struct fuse_copy_state *cs)
 {
 	if (cs->currbuf) {
@@ -1010,11 +1010,10 @@ void fuse_copy_finish(struct fuse_copy_state *cs)
 			buf->len = PAGE_SIZE - cs->len;
 		cs->currbuf = NULL;
 	} else if (cs->pg) {
-		if (cs->write) {
+		if (cs->write)
 			flush_dcache_page(cs->pg);
-			set_page_dirty_lock(cs->pg);
-		}
-		put_page(cs->pg);
+		if (cs->pinned)
+			unpin_user_pages_dirty_lock(&cs->pg, 1, cs->write);
 	}
 	cs->pg = NULL;
 }
@@ -1068,8 +1067,11 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 			cs->nr_segs++;
 		}
 	} else {
+		struct page **pages = &page;
 		size_t off;
-		err = iov_iter_get_pages2(cs->iter, &page, PAGE_SIZE, 1, &off);
+
+		err = iov_iter_extract_pages(cs->iter, &pages, PAGE_SIZE, 1, 0,
+					     &off);
 		if (err < 0)
 			return err;
 		if (!err)
@@ -1077,6 +1079,7 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 		cs->len = err;
 		cs->offset = off;
 		cs->pg = page;
+		cs->pinned = iov_iter_extract_will_pin(cs->iter);
 	}
 
 	return lock_request(cs->req);
