@@ -616,8 +616,15 @@ static void fuse_release_user_pages(struct fuse_args_pages *ap, ssize_t nres,
 	for (i = 0; i < ap->num_folios; i++) {
 		if (should_dirty)
 			folio_mark_dirty_lock(ap->folios[i]);
-		if (ap->args.is_pinned)
-			unpin_folio(ap->folios[i]);
+		if (ap->args.is_pinned) {
+			/* Each page in the range holds its own pin */
+			struct fuse_folio_desc *desc = &ap->descs[i];
+			unsigned int first = desc->offset / PAGE_SIZE;
+			unsigned int last = (desc->offset + desc->length - 1) /
+					    PAGE_SIZE;
+
+			unpin_user_folio(ap->folios[i], last - first + 1);
+		}
 	}
 
 	if (nres > 0 && ap->args.invalidate_vmap)
