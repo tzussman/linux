@@ -62,25 +62,33 @@ struct squashfs_page_actor *squashfs_page_actor_init(void **buffer,
 /* Implementation of page_actor for decompressing directly into page cache. */
 static void *handle_next_folio(struct squashfs_page_actor *actor)
 {
-	int max_pages = (actor->length + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	int max_pages = DIV_ROUND_UP(actor->length, PAGE_SIZE);
 	struct folio *folio;
+	pgoff_t index;
 
 	if (actor->returned_pages == max_pages)
 		return NULL;
 
-	actor->next_index++;
+	index = actor->next_index++;
 	actor->returned_pages++;
 
 	if (actor->next_page == actor->pages)
 		goto missing;
 
 	folio = actor->folio[actor->next_page];
-	if (actor->next_index - 1 != folio->index)
+	if (index != folio->index + (actor->folio_offset >> PAGE_SHIFT))
 		goto missing;
 
-	actor->next_page++;
 	actor->last_folio = folio;
-	return actor->pageaddr = kmap_local_folio(folio, 0);
+	actor->pageaddr = kmap_local_folio(folio, actor->folio_offset);
+
+	actor->folio_offset += PAGE_SIZE;
+	if (actor->folio_offset == folio_size(folio)) {
+		actor->folio_offset = 0;
+		actor->next_page++;
+	}
+
+	return actor->pageaddr;
 
 missing:
 	actor->last_folio = NULL;
@@ -112,6 +120,7 @@ struct squashfs_page_actor *squashfs_page_actor_init_folios(struct squashfs_sb_i
 	struct folio **folio, int nr_folios, int length, loff_t start)
 {
 	struct squashfs_page_actor *actor = kmalloc_obj(*actor);
+	int i;
 
 	if (actor == NULL)
 		return NULL;
@@ -126,8 +135,13 @@ struct squashfs_page_actor *squashfs_page_actor_init_folios(struct squashfs_sb_i
 	} else
 		actor->tmp_buffer = NULL;
 
-	actor->length = length ? : nr_folios * PAGE_SIZE;
+	if (!length)
+		for (i = 0; i < nr_folios; i++)
+			length += folio_size(folio[i]);
+
+	actor->length = length;
 	actor->folio = folio;
+	actor->folio_offset = 0;
 	actor->pages = nr_folios;
 	actor->next_page = 0;
 	actor->returned_pages = 0;

@@ -17,6 +17,7 @@ struct squashfs_page_actor {
 	void    *(*squashfs_next_page)(struct squashfs_page_actor *);
 	void    (*squashfs_finish_page)(struct squashfs_page_actor *);
 	struct folio *last_folio;
+	size_t	folio_offset;
 	int	pages;
 	int	length;
 	int	next_page;
