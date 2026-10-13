@@ -79,7 +79,7 @@ int squashfs_readpage_block(struct folio *folio, u64 block, int bsize,
 	/* Decompress directly into the page cache buffers */
 	res = squashfs_read_data(inode->i_sb, block, bsize, NULL, actor);
 
-	last_folio = squashfs_page_actor_free_folios(actor);
+	last_folio = squashfs_page_actor_free(actor);
 
 	if (res < 0)
 		goto mark_errored;

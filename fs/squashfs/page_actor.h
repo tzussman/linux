@@ -9,7 +9,6 @@
 struct squashfs_page_actor {
 	union {
 		void		**buffer;
-		struct page	**page;
 		struct folio	**folio;
 	};
 	void	*pageaddr;
@@ -17,7 +16,6 @@ struct squashfs_page_actor {
 	void    *(*squashfs_first_page)(struct squashfs_page_actor *);
 	void    *(*squashfs_next_page)(struct squashfs_page_actor *);
 	void    (*squashfs_finish_page)(struct squashfs_page_actor *);
-	struct page *last_page;
 	struct folio *last_folio;
 	int	pages;
 	int	length;
@@ -29,24 +27,11 @@ struct squashfs_page_actor {
 
 extern struct squashfs_page_actor *squashfs_page_actor_init(void **buffer,
 				int pages, int length);
-extern struct squashfs_page_actor *squashfs_page_actor_init_special(
-				struct squashfs_sb_info *msblk,
-				struct page **page, int pages, int length,
-				loff_t start_index);
 extern struct squashfs_page_actor *squashfs_page_actor_init_folios(
 				struct squashfs_sb_info *msblk,
 				struct folio **folio, int nr_folios, int length,
 				loff_t start);
-static inline struct page *squashfs_page_actor_free(struct squashfs_page_actor *actor)
-{
-	struct page *last_page = actor->next_page == actor->pages ? actor->last_page : ERR_PTR(-EIO);
-
-	kfree(actor->tmp_buffer);
-	kfree(actor);
-
-	return last_page;
-}
-static inline struct folio *squashfs_page_actor_free_folios(struct squashfs_page_actor *actor)
+static inline struct folio *squashfs_page_actor_free(struct squashfs_page_actor *actor)
 {
 	struct folio *last_folio = actor->next_page == actor->pages ?
 				   actor->last_folio : ERR_PTR(-EIO);

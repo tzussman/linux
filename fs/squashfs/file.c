@@ -544,7 +544,7 @@ static int squashfs_readahead_fragment(struct inode *inode,
 		addr = squashfs_next_page(actor);
 	}
 
-	last_folio = squashfs_page_actor_free_folios(actor);
+	last_folio = squashfs_page_actor_free(actor);
 
 	ok = copied == expected && !IS_ERR(last_folio);
 
@@ -564,7 +564,7 @@ static int squashfs_readahead_fragment(struct inode *inode,
 
 failed:
 	squashfs_finish_page(actor);
-	squashfs_page_actor_free_folios(actor);
+	squashfs_page_actor_free(actor);
 
 out:
 	squashfs_cache_put(buffer);
@@ -636,7 +636,7 @@ static void squashfs_readahead(struct readahead_control *ractl)
 
 		res = squashfs_read_data(inode->i_sb, block, bsize, NULL, actor);
 
-		last_folio = squashfs_page_actor_free_folios(actor);
+		last_folio = squashfs_page_actor_free(actor);
 
 		ok = res == expected && !IS_ERR(last_folio);
 
