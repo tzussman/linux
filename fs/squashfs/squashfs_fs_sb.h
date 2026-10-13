@@ -10,6 +10,7 @@
  * squashfs_fs_sb.h
  */
 
+#include <linux/fs.h>
 #include "squashfs_fs.h"
 
 /*
@@ -79,4 +80,27 @@ struct squashfs_sb_info {
 	const struct squashfs_decompressor_thread_ops *thread_ops;
 	int					max_thread_num;
 };
+
+static inline unsigned int squashfs_pages_per_block(const struct squashfs_sb_info *msblk)
+{
+	return 1U << (msblk->block_log - PAGE_SHIFT);
+}
+
+/* Index of the first page of the block that contains @index */
+static inline pgoff_t squashfs_block_first_index(const struct squashfs_sb_info *msblk,
+						 pgoff_t index)
+{
+	return round_down(index, squashfs_pages_per_block(msblk));
+}
+
+/* Number of bytes of file data in block @block */
+static inline unsigned int squashfs_block_bytes(struct inode *inode, u64 block)
+{
+	struct squashfs_sb_info *msblk = inode->i_sb->s_fs_info;
+	loff_t i_size = i_size_read(inode);
+
+	if (block == i_size >> msblk->block_log)
+		return i_size & (msblk->block_size - 1);
+	return msblk->block_size;
+}
 #endif
