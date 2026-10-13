@@ -139,3 +139,85 @@ struct squashfs_page_actor *squashfs_page_actor_init_special(struct squashfs_sb_
 	actor->squashfs_finish_page = direct_finish_page;
 	return actor;
 }
+
+/* Implementation of page_actor for decompressing directly into folios. */
+static void *handle_next_folio(struct squashfs_page_actor *actor)
+{
+	int max_pages = (actor->length + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	struct folio *folio;
+
+	if (actor->returned_pages == max_pages)
+		return NULL;
+
+	actor->next_index++;
+	actor->returned_pages++;
+
+	if (actor->next_page == actor->pages)
+		goto missing;
+
+	folio = actor->folio[actor->next_page];
+	if (actor->next_index - 1 != folio->index)
+		goto missing;
+
+	actor->next_page++;
+	actor->last_folio = folio;
+	return actor->pageaddr = kmap_local_folio(folio, 0);
+
+missing:
+	actor->last_folio = NULL;
+	return actor->alloc_buffer ? actor->tmp_buffer : ERR_PTR(-ENOMEM);
+}
+
+static void *direct_folio_first_page(struct squashfs_page_actor *actor)
+{
+	return handle_next_folio(actor);
+}
+
+static void *direct_folio_next_page(struct squashfs_page_actor *actor)
+{
+	if (actor->pageaddr) {
+		kunmap_local(actor->pageaddr);
+		actor->pageaddr = NULL;
+	}
+
+	return handle_next_folio(actor);
+}
+
+static void direct_folio_finish_page(struct squashfs_page_actor *actor)
+{
+	if (actor->pageaddr)
+		kunmap_local(actor->pageaddr);
+}
+
+struct squashfs_page_actor *squashfs_page_actor_init_folios(struct squashfs_sb_info *msblk,
+	struct folio **folio, int nr_folios, int length, loff_t start)
+{
+	struct squashfs_page_actor *actor = kmalloc_obj(*actor);
+
+	if (actor == NULL)
+		return NULL;
+
+	if (msblk->decompressor->alloc_buffer) {
+		actor->tmp_buffer = kmalloc(PAGE_SIZE, GFP_KERNEL);
+
+		if (actor->tmp_buffer == NULL) {
+			kfree(actor);
+			return NULL;
+		}
+	} else
+		actor->tmp_buffer = NULL;
+
+	actor->length = length ? : nr_folios * PAGE_SIZE;
+	actor->folio = folio;
+	actor->pages = nr_folios;
+	actor->next_page = 0;
+	actor->returned_pages = 0;
+	actor->next_index = start >> PAGE_SHIFT;
+	actor->pageaddr = NULL;
+	actor->last_folio = NULL;
+	actor->alloc_buffer = msblk->decompressor->alloc_buffer;
+	actor->squashfs_first_page = direct_folio_first_page;
+	actor->squashfs_next_page = direct_folio_next_page;
+	actor->squashfs_finish_page = direct_folio_finish_page;
+	return actor;
+}
