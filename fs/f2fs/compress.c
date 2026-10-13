@@ -1169,7 +1169,7 @@ static void cancel_cluster_writeback(struct compress_ctx *cc,
 
 	/* Cancel writeback and stay locked. */
 	for (i = 0; i < nr_folios; i++) {
-		struct folio *folio = page_folio(cc->rpages[i]);
+		struct folio *folio = cc->rfolios[i];
 		unsigned int last_blk_in_folio =
 			((i + 1) << F2FS_LOG_BLKS_PER_PAGE(sbi)) - 1;
 
@@ -1196,11 +1196,10 @@ static void set_cluster_dirty(struct compress_ctx *cc)
 	int i;
 
 	for (i = 0; i < nr_folios; i++) {
-		struct folio *folio;
+		struct folio *folio = cc->rfolios[i];
 
-		if (!cc->rpages[i])
+		if (!folio)
 			continue;
-		folio = page_folio(cc->rpages[i]);
 		/*
 		 * The whole cluster is rewritten. This also attaches a folio
 		 * state to a multi-block folio before it is dirtied.
@@ -1658,10 +1657,9 @@ void f2fs_compress_write_end_io(struct bio *bio, struct folio *folio,
 	page_array_free(sbi, cic->cpages, cic->nr_cpages);
 
 	for (i = 0; i < cic->nr_rpages; i++) {
-		struct folio *rfolio;
+		struct folio *rfolio = cic->rfolios[i];
 
-		WARN_ON(!cic->rpages[i]);
-		rfolio = page_folio(cic->rpages[i]);
+		WARN_ON(!rfolio);
 		folio_clear_f2fs_gcing(rfolio);
 		folio_end_writeback(rfolio);
 	}
@@ -1782,12 +1780,12 @@ static void dirty_partial_compressed_cluster(struct compress_ctx *cc)
 	if (cc->nr_rpages != nr_folios || f2fs_cluster_is_full(cc))
 		return;
 	for (i = 0; i < nr_folios; i++)
-		if (!folio_test_uptodate(page_folio(cc->rpages[i])))
+		if (!folio_test_uptodate(cc->rfolios[i]))
 			return;
 	if (f2fs_compressed_blocks(cc) <= 0)
 		return;
 	for (i = 0; i < nr_folios; i++) {
-		struct folio *folio = page_folio(cc->rpages[i]);
+		struct folio *folio = cc->rfolios[i];
 
 		/* A folio without a folio state is dirty as a whole. */
 		if (f2fs_folio_has_ffs(folio))
