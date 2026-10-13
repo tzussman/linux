@@ -503,8 +503,9 @@ out:
 	return res;
 }
 
-static int squashfs_readahead_fragment(struct inode *inode, struct page **page,
-	unsigned int pages, unsigned int expected, loff_t start)
+static int squashfs_readahead_fragment(struct inode *inode,
+	struct folio **folios, unsigned int nr_folios, unsigned int expected,
+	loff_t start)
 {
 	struct squashfs_cache_entry *buffer = squashfs_get_fragment(inode->i_sb,
 		squashfs_i(inode)->fragment_block,
@@ -514,12 +515,13 @@ static int squashfs_readahead_fragment(struct inode *inode, struct page **page,
 	struct squashfs_page_actor *actor;
 	unsigned int offset;
 	void *addr;
-	struct page *last_page;
+	struct folio *last_folio;
+	bool ok;
 
 	if (buffer->error)
 		goto out;
 
-	actor = squashfs_page_actor_init_special(msblk, page, pages,
+	actor = squashfs_page_actor_init_folios(msblk, folios, nr_folios,
 							expected, start);
 	if (!actor)
 		goto out;
@@ -542,23 +544,19 @@ static int squashfs_readahead_fragment(struct inode *inode, struct page **page,
 		addr = squashfs_next_page(actor);
 	}
 
-	last_page = squashfs_page_actor_free(actor);
+	last_folio = squashfs_page_actor_free_folios(actor);
 
-	if (copied == expected && !IS_ERR(last_page)) {
-		/* Last page (if present) may have trailing bytes not filled */
-		bytes = copied % PAGE_SIZE;
-		if (bytes && last_page)
-			memzero_page(last_page, bytes, PAGE_SIZE - bytes);
+	ok = copied == expected && !IS_ERR(last_folio);
 
-		for (i = 0; i < pages; i++) {
-			flush_dcache_page(page[i]);
-			SetPageUptodate(page[i]);
-		}
-	}
+	/* Last folio (if present) may have trailing bytes not filled */
+	bytes = copied % PAGE_SIZE;
+	if (ok && last_folio && bytes)
+		folio_zero_segment(last_folio, bytes, PAGE_SIZE);
 
-	for (i = 0; i < pages; i++) {
-		unlock_page(page[i]);
-		put_page(page[i]);
+	for (i = 0; i < nr_folios; i++) {
+		if (ok)
+			flush_dcache_folio(folios[i]);
+		folio_end_read(folios[i], ok);
 	}
 
 	squashfs_cache_put(buffer);
@@ -566,7 +564,7 @@ static int squashfs_readahead_fragment(struct inode *inode, struct page **page,
 
 failed:
 	squashfs_finish_page(actor);
-	squashfs_page_actor_free(actor);
+	squashfs_page_actor_free_folios(actor);
 
 out:
 	squashfs_cache_put(buffer);
@@ -577,96 +575,93 @@ static void squashfs_readahead(struct readahead_control *ractl)
 {
 	struct inode *inode = ractl->mapping->host;
 	struct squashfs_sb_info *msblk = inode->i_sb->s_fs_info;
-	size_t mask = (1UL << msblk->block_log) - 1;
-	unsigned short shift = msblk->block_log - PAGE_SHIFT;
-	loff_t start = readahead_pos(ractl) & ~mask;
+	loff_t start = round_down(readahead_pos(ractl), msblk->block_size);
 	size_t len = readahead_length(ractl) + readahead_pos(ractl) - start;
 	struct squashfs_page_actor *actor;
-	unsigned int nr_pages = 0;
-	struct page **pages;
+	unsigned int nr_folios = 0;
+	struct folio **folios;
 	int i;
 	loff_t file_end = i_size_read(inode) >> msblk->block_log;
-	unsigned int max_pages = 1UL << shift;
+	unsigned int max_pages = squashfs_pages_per_block(msblk);
 
 	readahead_expand(ractl, start, round_up(len, msblk->block_size));
 
-	pages = kmalloc_array(max_pages, sizeof(void *), GFP_KERNEL);
-	if (!pages)
+	folios = kmalloc_objs(*folios, max_pages);
+	if (!folios)
 		return;
 
 	for (;;) {
-		int res, bsize;
-		u64 block = 0;
+		int res, bsize, bytes;
+		u64 index, block = 0;
 		unsigned int expected;
-		struct page *last_page;
+		struct folio *last_folio;
+		size_t batch_len = 0;
+		bool ok;
 
-		expected = start >> msblk->block_log == file_end ?
-			   (i_size_read(inode) & (msblk->block_size - 1)) :
-			    msblk->block_size;
+		index = start >> msblk->block_log;
+		expected = squashfs_block_bytes(inode, index);
 
-		max_pages = (expected + PAGE_SIZE - 1) >> PAGE_SHIFT;
+		for (nr_folios = 0; batch_len < expected; nr_folios++) {
+			struct folio *folio = readahead_folio(ractl);
 
-		nr_pages = __readahead_batch(ractl, pages, max_pages);
-		if (!nr_pages)
+			if (!folio)
+				break;
+
+			folios[nr_folios] = folio;
+			batch_len += folio_size(folio);
+		}
+		if (!nr_folios)
 			break;
 
-		if (readahead_pos(ractl) >= i_size_read(inode))
-			goto skip_pages;
+		if (folio_pos(folios[0]) >= i_size_read(inode))
+			goto skip_folios;
 
-		if (start >> msblk->block_log == file_end &&
+		if (index == file_end &&
 				squashfs_i(inode)->fragment_block != SQUASHFS_INVALID_BLK) {
-			res = squashfs_readahead_fragment(inode, pages,
-					nr_pages, expected, start);
+			res = squashfs_readahead_fragment(inode, folios,
+					nr_folios, expected, start);
 			if (res)
-				goto skip_pages;
+				goto skip_folios;
 			continue;
 		}
 
-		bsize = read_blocklist(inode, start >> msblk->block_log, &block);
+		bsize = read_blocklist(inode, index, &block);
 		if (bsize == 0)
-			goto skip_pages;
+			goto skip_folios;
 
-		actor = squashfs_page_actor_init_special(msblk, pages, nr_pages,
+		actor = squashfs_page_actor_init_folios(msblk, folios, nr_folios,
 							expected, start);
 		if (!actor)
-			goto skip_pages;
+			goto skip_folios;
 
 		res = squashfs_read_data(inode->i_sb, block, bsize, NULL, actor);
 
-		last_page = squashfs_page_actor_free(actor);
+		last_folio = squashfs_page_actor_free_folios(actor);
 
-		if (res == expected && !IS_ERR(last_page)) {
-			int bytes;
+		ok = res == expected && !IS_ERR(last_folio);
 
-			/* Last page (if present) may have trailing bytes not filled */
-			bytes = res % PAGE_SIZE;
-			if (start >> msblk->block_log == file_end && bytes && last_page)
-				memzero_page(last_page, bytes,
-					     PAGE_SIZE - bytes);
+		/* Last folio (if present) may have trailing bytes not filled */
+		bytes = res % PAGE_SIZE;
+		if (ok && index == file_end && last_folio &&
+				bytes)
+			folio_zero_segment(last_folio, bytes, PAGE_SIZE);
 
-			for (i = 0; i < nr_pages; i++) {
-				flush_dcache_page(pages[i]);
-				SetPageUptodate(pages[i]);
-			}
+		for (i = 0; i < nr_folios; i++) {
+			if (ok)
+				flush_dcache_folio(folios[i]);
+			folio_end_read(folios[i], ok);
 		}
 
-		for (i = 0; i < nr_pages; i++) {
-			unlock_page(pages[i]);
-			put_page(pages[i]);
-		}
-
-		start += readahead_batch_length(ractl);
+		start += batch_len;
 	}
 
-	kfree(pages);
+	kfree(folios);
 	return;
 
-skip_pages:
-	for (i = 0; i < nr_pages; i++) {
-		unlock_page(pages[i]);
-		put_page(pages[i]);
-	}
-	kfree(pages);
+skip_folios:
+	for (i = 0; i < nr_folios; i++)
+		folio_unlock(folios[i]);
+	kfree(folios);
 }
 
 static loff_t seek_hole_data(struct file *file, loff_t offset, int whence)
