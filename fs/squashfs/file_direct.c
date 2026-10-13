@@ -44,7 +44,7 @@ int squashfs_readpage_block(struct folio *folio, u64 block, int bsize,
 		return res;
 
 	/* Try to grab all the folios covered by the Squashfs block */
-	for (i = 0, index = start_index; index <= end_index; index++) {
+	for (i = 0, index = start_index; index <= end_index;) {
 		struct folio *f;
 
 		if (index == folio->index)
@@ -54,8 +54,12 @@ int squashfs_readpage_block(struct folio *folio, u64 block, int bsize,
 					FGP_LOCK | FGP_CREAT | FGP_NOWAIT,
 					mapping_gfp_mask(folio->mapping));
 
-		if (IS_ERR(f))
+		if (IS_ERR(f)) {
+			index++;
 			continue;
+		}
+
+		index = folio_next_index(f);
 
 		if (folio_test_uptodate(f)) {
 			folio_unlock(f);
