@@ -1353,7 +1353,6 @@ struct f2fs_io_info {
 	struct folio *folio;	/* folio to be written */
 	pgoff_t folio_offset;	/* offset in large folio */
 	unsigned int folio_blkcnt;	/* block count in large folio */
-	struct page *encrypted_page;	/* encrypted page */
 	struct page *compressed_page;	/* compressed page */
 	struct list_head list;		/* serialize IOs */
 	unsigned int compr_blocks;	/* # of compressed block addresses */

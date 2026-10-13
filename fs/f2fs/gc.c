@@ -1229,7 +1229,6 @@ static int ra_data_block(struct inode *inode, pgoff_t index)
 		.op = REQ_OP_READ,
 		.op_flags = 0,
 		.folio_blkcnt = 1,
-		.encrypted_page = NULL,
 		.in_list = 0,
 		.is_cache = 1,
 	};
@@ -1371,7 +1370,6 @@ static int move_data_block(struct inode *inode, block_t bidx,
 		.op = REQ_OP_READ,
 		.op_flags = 0,
 		.folio_blkcnt = 1,
-		.encrypted_page = NULL,
 		.in_list = 0,
 		.is_cache = 1,
 	};
@@ -1600,7 +1598,6 @@ static int move_data_cache_block(struct inode *inode, block_t bidx, int gc_type,
 			.folio = folio,
 			.folio_offset = f2fs_folio_blk_offset(sbi, folio, bidx),
 			.folio_blkcnt = 1,
-			.encrypted_page = NULL,
 			.need_lock = LOCK_REQ,
 			.io_type = FS_GC_DATA_IO,
 		};

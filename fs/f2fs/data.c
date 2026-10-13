@@ -655,26 +655,18 @@ static void f2fs_set_bio_crypt_ctx(struct bio *bio, const struct inode *inode,
 				  gfp_t gfp_mask)
 {
 	/*
-	 * The f2fs garbage collector sets ->encrypted_page when it wants to
+	 * The f2fs garbage collector sets ->is_cache when it wants to
 	 * read/write raw data without encryption.
 	 */
-	if (!fio || (!fio->encrypted_page && !fio->is_cache))
+	if (!fio || !fio->is_cache)
 		fscrypt_set_bio_crypt_ctx(bio, inode,
 				(loff_t)first_idx << inode->i_blkbits,
 				gfp_mask);
 }
 
 static bool f2fs_crypt_mergeable_bio(struct bio *bio, const struct inode *inode,
-				     pgoff_t next_idx,
-				     const struct f2fs_io_info *fio)
+				     pgoff_t next_idx)
 {
-	/*
-	 * The f2fs garbage collector sets ->encrypted_page when it wants to
-	 * read/write raw data without encryption.
-	 */
-	if (fio && fio->encrypted_page)
-		return !bio_has_crypt_ctx(bio);
-
 	return fscrypt_mergeable_bio(bio, inode,
 			(loff_t)next_idx << inode->i_blkbits);
 }
@@ -935,29 +927,23 @@ int f2fs_submit_page_bio(struct f2fs_io_info *fio)
 {
 	struct bio *bio;
 	struct folio *fio_folio = fio->folio;
-	struct folio *data_folio = fio->encrypted_page ?
-			page_folio(fio->encrypted_page) : fio_folio;
 	pgoff_t fio_lblk = F2FS_FIO_LBLK(fio);
-	size_t bio_offset;
-	size_t bio_len;
-
-	bio_offset = data_folio == fio_folio ? F2FS_FIO_BIO_OFFSET(fio) : 0;
-	bio_len = data_folio == fio_folio ? F2FS_FIO_BIO_SIZE(fio) :
-					    folio_size(data_folio);
+	size_t bio_offset = F2FS_FIO_BIO_OFFSET(fio);
+	size_t bio_len = F2FS_FIO_BIO_SIZE(fio);
 
 	if (!f2fs_is_valid_blkaddr(fio->sbi, fio->new_blkaddr,
 			fio->is_por ? META_POR : (__is_meta_io(fio) ?
 			META_GENERIC : DATA_GENERIC_ENHANCE)))
 		return -EFSCORRUPTED;
 
-	trace_f2fs_submit_folio_bio(data_folio, fio);
+	trace_f2fs_submit_folio_bio(fio_folio, fio);
 
 	/* Allocate a new bio */
 	bio = __bio_alloc(fio, 1);
 
 	f2fs_set_bio_crypt_ctx(bio, fio_folio->mapping->host,
 			fio_lblk, fio, GFP_NOIO);
-	bio_add_folio_nofail(bio, data_folio, bio_len, bio_offset);
+	bio_add_folio_nofail(bio, fio_folio, bio_len, bio_offset);
 
 	if (fio->io_wbc && !is_read_io(fio->op))
 		wbc_account_cgroup_owner(fio->io_wbc, fio_folio, bio_len);
@@ -1042,18 +1028,13 @@ static void del_bio_entry(struct bio_entry *be)
 	kmem_cache_free(bio_entry_slab, be);
 }
 
-static int add_ipu_page(struct f2fs_io_info *fio, struct bio **bio,
-							struct folio *folio)
+static int add_ipu_page(struct f2fs_io_info *fio, struct bio **bio)
 {
-	struct folio *fio_folio = fio->folio;
+	struct folio *folio = fio->folio;
 	pgoff_t fio_lblk = F2FS_FIO_LBLK(fio);
-	size_t bio_offset;
-	size_t bio_len;
+	size_t bio_offset = F2FS_FIO_BIO_OFFSET(fio);
+	size_t bio_len = F2FS_FIO_BIO_SIZE(fio);
 	struct f2fs_sb_info *sbi = fio->sbi;
-
-	bio_offset = folio == fio_folio ? F2FS_FIO_BIO_OFFSET(fio) : 0;
-	bio_len = folio == fio_folio ? F2FS_FIO_BIO_SIZE(fio) :
-				       folio_size(folio);
 	enum temp_type temp;
 	bool found = false;
 	int ret = -EAGAIN;
@@ -1073,9 +1054,8 @@ static int add_ipu_page(struct f2fs_io_info *fio, struct bio **bio,
 			f2fs_bug_on(sbi, !page_is_mergeable(sbi, *bio,
 							    *fio->last_block,
 							    fio->new_blkaddr));
-			if (f2fs_crypt_mergeable_bio(*bio,
-					fio_folio->mapping->host,
-					fio_lblk, fio) &&
+			if (f2fs_crypt_mergeable_bio(*bio, folio->mapping->host,
+						     fio_lblk) &&
 			    bio_add_folio(*bio, folio, bio_len, bio_offset)) {
 				ret = 0;
 				break;
@@ -1187,23 +1167,17 @@ void f2fs_submit_all_merged_ipu_writes(struct f2fs_sb_info *sbi)
 int f2fs_merge_page_bio(struct f2fs_io_info *fio)
 {
 	struct bio *bio = *fio->bio;
-	struct folio *data_folio = fio->encrypted_page ?
-			page_folio(fio->encrypted_page) : fio->folio;
 	struct folio *folio = fio->folio;
 	pgoff_t fio_lblk = F2FS_FIO_LBLK(fio);
 	unsigned int fio_cnt = F2FS_FIO_BLKCNT(fio);
-	size_t bio_offset;
-	size_t bio_len;
-
-	bio_offset = data_folio == folio ? F2FS_FIO_BIO_OFFSET(fio) : 0;
-	bio_len = data_folio == folio ? F2FS_FIO_BIO_SIZE(fio) :
-					folio_size(data_folio);
+	size_t bio_offset = F2FS_FIO_BIO_OFFSET(fio);
+	size_t bio_len = F2FS_FIO_BIO_SIZE(fio);
 
 	if (!f2fs_is_valid_blkaddr(fio->sbi, fio->new_blkaddr,
 			__is_meta_io(fio) ? META_GENERIC : DATA_GENERIC))
 		return -EFSCORRUPTED;
 
-	trace_f2fs_submit_folio_bio(data_folio, fio);
+	trace_f2fs_submit_folio_bio(folio, fio);
 
 	if (bio && !page_is_mergeable(fio->sbi, bio, *fio->last_block,
 						fio->new_blkaddr))
@@ -1214,10 +1188,10 @@ alloc_new:
 		f2fs_set_bio_crypt_ctx(bio, folio->mapping->host,
 				fio_lblk, fio, GFP_NOIO);
 
-		add_bio_entry(fio->sbi, bio, data_folio, bio_len,
+		add_bio_entry(fio->sbi, bio, folio, bio_len,
 			     bio_offset, fio->temp);
 	} else {
-		if (add_ipu_page(fio, &bio, data_folio))
+		if (add_ipu_page(fio, &bio))
 			goto alloc_new;
 	}
 
@@ -1315,9 +1289,7 @@ next:
 
 	verify_fio_blkaddr(fio);
 
-	if (fio->encrypted_page)
-		bio_folio = page_folio(fio->encrypted_page);
-	else if (fio->compressed_page)
+	if (fio->compressed_page)
 		bio_folio = page_folio(fio->compressed_page);
 	else
 		bio_folio = fio->folio;
@@ -1336,7 +1308,7 @@ next:
 	    (!io_is_mergeable(sbi, io->bio, io, fio, io->last_block_in_bio,
 			      fio->new_blkaddr) ||
 	     !f2fs_crypt_mergeable_bio(io->bio, fio_inode(fio),
-				fio_lblk, fio)))
+				fio_lblk)))
 		__submit_merged_bio(io);
 alloc_new:
 	if (io->bio == NULL) {
@@ -1346,14 +1318,8 @@ alloc_new:
 		io->fio = *fio;
 	}
 
-	/* A compressed page holds several blocks with subpage blocks. */
-	if (bio_folio == fio->folio || fio->compressed_page) {
-		bio_offset = F2FS_FIO_BIO_OFFSET(fio);
-		bio_len = F2FS_FIO_BIO_SIZE(fio);
-	} else {
-		bio_offset = 0;
-		bio_len = folio_size(bio_folio);
-	}
+	bio_offset = F2FS_FIO_BIO_OFFSET(fio);
+	bio_len = F2FS_FIO_BIO_SIZE(fio);
 
 	if (!bio_add_folio(io->bio, bio_folio, bio_len, bio_offset)) {
 		__submit_merged_bio(io);
@@ -2726,7 +2692,7 @@ zero_out:
 	 */
 	if (bio && (!page_is_mergeable(F2FS_I_SB(inode), bio,
 				       *last_block_in_bio, block_nr) ||
-		    !f2fs_crypt_mergeable_bio(bio, inode, index, NULL))) {
+		    !f2fs_crypt_mergeable_bio(bio, inode, index))) {
 submit_and_realloc:
 		f2fs_submit_read_bio(F2FS_I_SB(inode), bio, DATA);
 		bio = NULL;
@@ -2881,7 +2847,7 @@ skip_reading_dnode:
 
 		if (bio && (!page_is_mergeable(sbi, bio,
 					*last_block_in_bio, blkaddr) ||
-		    !f2fs_crypt_mergeable_bio(bio, inode, start_idx + 1 + i, NULL))) {
+		    !f2fs_crypt_mergeable_bio(bio, inode, start_idx + 1 + i))) {
 submit_and_realloc:
 			f2fs_submit_read_bio(sbi, bio, DATA);
 			bio = NULL;
@@ -3553,7 +3519,7 @@ got_it:
 		 */
 		if (bio && (!page_is_mergeable(sbi, bio,
 						last_block_in_bio, block_nr) ||
-			!f2fs_crypt_mergeable_bio(bio, inode, index, NULL))) {
+			!f2fs_crypt_mergeable_bio(bio, inode, index))) {
 submit_and_realloc:
 			f2fs_submit_read_bio(sbi, bio, DATA);
 			bio = NULL;
@@ -4080,7 +4046,6 @@ static int f2fs_write_folio_dirty_range(struct folio *folio, int *submitted,
 			.folio = folio,
 			.folio_offset = i,
 			.folio_blkcnt = 1,
-			.encrypted_page = NULL,
 			.submitted = 0,
 			.compr_blocks = (i == 0) ? compr_blocks : 0,
 			.need_lock = LOCK_DONE,
@@ -4317,7 +4282,6 @@ int f2fs_write_single_data_page(struct folio *folio, int *submitted,
 		.old_blkaddr = NULL_ADDR,
 		.folio = folio,
 		.folio_blkcnt = 1,
-		.encrypted_page = NULL,
 		.submitted = 0,
 		.compr_blocks = compr_blocks,
 		.need_lock = compr_blocks ? LOCK_DONE : LOCK_RETRY,
