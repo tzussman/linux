@@ -28,8 +28,9 @@ int squashfs_readpage_block(struct folio *folio, u64 block, int bsize,
 	unsigned int nr = squashfs_pages_per_block(msblk);
 	loff_t start_index = squashfs_block_first_index(msblk, folio->index);
 	loff_t end_index = start_index + nr - 1;
+	loff_t start = start_index << PAGE_SHIFT;
 	loff_t index;
-	int i, nr_folios, bytes, res = -ENOMEM;
+	int i, nr_folios, res = -ENOMEM;
 	struct folio **folios, *last_folio;
 	struct squashfs_page_actor *actor;
 
@@ -72,7 +73,7 @@ int squashfs_readpage_block(struct folio *folio, u64 block, int bsize,
 	 * page cache folios appropriately within the decompressor.
 	 */
 	actor = squashfs_page_actor_init_folios(msblk, folios, nr_folios,
-					expected, start_index << PAGE_SHIFT);
+					expected, start);
 	if (actor == NULL)
 		goto mark_errored;
 
@@ -90,9 +91,8 @@ int squashfs_readpage_block(struct folio *folio, u64 block, int bsize,
 	}
 
 	/* Last folio (if present) may have trailing bytes not filled */
-	bytes = res % PAGE_SIZE;
-	if (end_index == file_end && last_folio && bytes)
-		folio_zero_segment(last_folio, bytes, PAGE_SIZE);
+	if (end_index == file_end && last_folio)
+		squashfs_actor_zero_tail(last_folio, start, res);
 
 	/* Mark folios as uptodate, unlock and release */
 	for (i = 0; i < nr_folios; i++) {

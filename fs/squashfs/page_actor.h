@@ -6,6 +6,9 @@
  * Phillip Lougher <phillip@squashfs.org.uk>
  */
 
+#include <linux/highmem.h>
+#include <linux/pagemap.h>
+
 struct squashfs_page_actor {
 	union {
 		void		**buffer;
@@ -57,5 +60,18 @@ static inline void squashfs_finish_page(struct squashfs_page_actor *actor)
 static inline void squashfs_actor_nobuff(struct squashfs_page_actor *actor)
 {
 	actor->alloc_buffer = 0;
+}
+
+/*
+ * Zero whatever is left of @folio past the data, which starts at @start and
+ * is @length bytes long. Meant for the last folio the actor filled.
+ */
+static inline void squashfs_actor_zero_tail(struct folio *folio, loff_t start,
+				size_t length)
+{
+	size_t end = length - (folio_pos(folio) - start);
+
+	if (end < folio_size(folio))
+		folio_zero_segment(folio, end, folio_size(folio));
 }
 #endif

@@ -549,9 +549,8 @@ static int squashfs_readahead_fragment(struct inode *inode,
 	ok = copied == expected && !IS_ERR(last_folio);
 
 	/* Last folio (if present) may have trailing bytes not filled */
-	bytes = copied % PAGE_SIZE;
-	if (ok && last_folio && bytes)
-		folio_zero_segment(last_folio, bytes, PAGE_SIZE);
+	if (ok && last_folio)
+		squashfs_actor_zero_tail(last_folio, start, copied);
 
 	for (i = 0; i < nr_folios; i++) {
 		if (ok)
@@ -591,7 +590,7 @@ static void squashfs_readahead(struct readahead_control *ractl)
 		return;
 
 	for (;;) {
-		int res, bsize, bytes;
+		int res, bsize;
 		u64 index, block = 0;
 		unsigned int expected;
 		struct folio *last_folio;
@@ -641,10 +640,8 @@ static void squashfs_readahead(struct readahead_control *ractl)
 		ok = res == expected && !IS_ERR(last_folio);
 
 		/* Last folio (if present) may have trailing bytes not filled */
-		bytes = res % PAGE_SIZE;
-		if (ok && index == file_end && last_folio &&
-				bytes)
-			folio_zero_segment(last_folio, bytes, PAGE_SIZE);
+		if (ok && index == file_end && last_folio)
+			squashfs_actor_zero_tail(last_folio, start, res);
 
 		for (i = 0; i < nr_folios; i++) {
 			if (ok)
