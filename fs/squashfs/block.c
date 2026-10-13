@@ -186,24 +186,24 @@ out:
 	return 0;
 }
 
-static struct page *squashfs_get_cache_page(struct address_space *mapping,
-					    pgoff_t index)
+static struct folio *squashfs_get_cache_folio(struct address_space *mapping,
+					      pgoff_t index)
 {
-	struct page *page;
+	struct folio *folio;
 
 	if (!mapping)
 		return NULL;
 
-	page = find_get_page(mapping, index);
-	if (!page)
+	folio = filemap_get_folio(mapping, index);
+	if (IS_ERR(folio))
 		return NULL;
 
-	if (!PageUptodate(page)) {
-		put_page(page);
+	if (!folio_test_uptodate(folio)) {
+		folio_put(folio);
 		return NULL;
 	}
 
-	return page;
+	return folio;
 }
 
 static int squashfs_bio_read(struct super_block *sb, u64 index, int length,
@@ -231,22 +231,23 @@ static int squashfs_bio_read(struct super_block *sb, u64 index, int length,
 		unsigned int len =
 			min_t(unsigned int, PAGE_SIZE - offset, total_len);
 		pgoff_t index = (read_start >> PAGE_SHIFT) + i;
-		struct page *page;
+		struct folio *folio;
 
-		page = squashfs_get_cache_page(cache_mapping, index);
-		if (!page)
-			page = alloc_page(GFP_NOIO);
+		folio = squashfs_get_cache_folio(cache_mapping, index);
+		if (!folio)
+			folio = folio_alloc(GFP_NOIO, 0);
 
-		if (!page) {
+		if (!folio) {
 			error = -ENOMEM;
 			goto out_free_bio;
 		}
 
 		/*
-		 * Use the __ version to avoid merging since we need each page
-		 * to be separate when we check for and avoid cached pages.
+		 * squashfs_bio_read_cached() needs one bvec per folio to find
+		 * and skip the cached ones. bio_add_folio_nofail() never merges
+		 * with the previous bvec, unlike bio_add_folio().
 		 */
-		__bio_add_page(bio, page, len, offset);
+		bio_add_folio_nofail(bio, folio, len, offset);
 		offset = 0;
 		total_len -= len;
 	}
