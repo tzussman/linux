@@ -741,7 +741,7 @@ static int ecryptfs_zero_tail(struct inode *inode, loff_t pos)
 	folio_lock(folio);
 	folio_zero_range(folio, from, folio_size(folio) - from);
 	folio_unlock(folio);
-	rc = ecryptfs_encrypt_page(folio);
+	rc = ecryptfs_encrypt_folio(folio);
 	folio_put(folio);
 	return rc;
 }
