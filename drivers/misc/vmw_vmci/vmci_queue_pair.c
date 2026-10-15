@@ -626,20 +626,13 @@ static void qp_release_queue_mutex(struct vmci_queue *queue)
 
 /*
  * Helper function to release pages in the PageStoreAttachInfo
- * previously obtained using get_user_pages.
+ * previously pinned with pin_user_pages_fast().
  */
 static void qp_release_pages(struct page **pages,
 			     u64 num_pages, bool dirty)
 {
-	int i;
-
-	for (i = 0; i < num_pages; i++) {
-		if (dirty)
-			set_page_dirty_lock(pages[i]);
-
-		put_page(pages[i]);
-		pages[i] = NULL;
-	}
+	unpin_user_pages_dirty_lock(pages, num_pages, dirty);
+	memset(pages, 0, num_pages * sizeof(*pages));
 }
 
 /*
@@ -655,30 +648,40 @@ static int qp_host_get_user_memory(u64 produce_uva,
 	int retval;
 	int err = VMCI_SUCCESS;
 
-	retval = get_user_pages_fast((uintptr_t) produce_uva,
+	retval = pin_user_pages_fast((uintptr_t) produce_uva,
 				     produce_q->kernel_if->num_pages,
 				     FOLL_WRITE,
 				     produce_q->kernel_if->u.h.header_page);
 	if (retval < (int)produce_q->kernel_if->num_pages) {
-		pr_debug("get_user_pages_fast(produce) failed (retval=%d)",
+		pr_debug("pin_user_pages_fast(produce) failed (retval=%d)",
 			retval);
 		if (retval > 0)
 			qp_release_pages(produce_q->kernel_if->u.h.header_page,
 					retval, false);
+		/*
+		 * pin_user_pages_fast() can leave entries past the count it
+		 * returns. Clear them so the queue does not look registered.
+		 */
+		memset(produce_q->kernel_if->u.h.header_page, 0,
+		       produce_q->kernel_if->num_pages *
+		       sizeof(*produce_q->kernel_if->u.h.header_page));
 		err = VMCI_ERROR_NO_MEM;
 		goto out;
 	}
 
-	retval = get_user_pages_fast((uintptr_t) consume_uva,
+	retval = pin_user_pages_fast((uintptr_t) consume_uva,
 				     consume_q->kernel_if->num_pages,
 				     FOLL_WRITE,
 				     consume_q->kernel_if->u.h.header_page);
 	if (retval < (int)consume_q->kernel_if->num_pages) {
-		pr_debug("get_user_pages_fast(consume) failed (retval=%d)",
+		pr_debug("pin_user_pages_fast(consume) failed (retval=%d)",
 			retval);
 		if (retval > 0)
 			qp_release_pages(consume_q->kernel_if->u.h.header_page,
 					retval, false);
+		memset(consume_q->kernel_if->u.h.header_page, 0,
+		       consume_q->kernel_if->num_pages *
+		       sizeof(*consume_q->kernel_if->u.h.header_page));
 		qp_release_pages(produce_q->kernel_if->u.h.header_page,
 				 produce_q->kernel_if->num_pages, false);
 		err = VMCI_ERROR_NO_MEM;
@@ -722,14 +725,8 @@ static void qp_host_unregister_user_memory(struct vmci_queue *produce_q,
 {
 	qp_release_pages(produce_q->kernel_if->u.h.header_page,
 			 produce_q->kernel_if->num_pages, true);
-	memset(produce_q->kernel_if->u.h.header_page, 0,
-	       sizeof(*produce_q->kernel_if->u.h.header_page) *
-	       produce_q->kernel_if->num_pages);
 	qp_release_pages(consume_q->kernel_if->u.h.header_page,
 			 consume_q->kernel_if->num_pages, true);
-	memset(consume_q->kernel_if->u.h.header_page, 0,
-	       sizeof(*consume_q->kernel_if->u.h.header_page) *
-	       consume_q->kernel_if->num_pages);
 }
 
 /*
