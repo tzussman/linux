@@ -467,6 +467,7 @@ static int __access_remote_tags(struct mm_struct *mm, unsigned long addr,
 			err = PTR_ERR(page);
 			break;
 		}
+		folio = page_folio(page);
 
 		/*
 		 * Only copy tags if the page has been mapped as PROT_MTE
@@ -477,16 +478,15 @@ static int __access_remote_tags(struct mm_struct *mm, unsigned long addr,
 		 */
 		if (!(vma->vm_flags & VM_MTE)) {
 			err = -EIO;
-			put_page(page);
+			folio_put(folio);
 			break;
 		}
 
-		folio = page_folio(page);
 		if (folio_test_hugetlb(folio))
 			WARN_ON_ONCE(!folio_test_hugetlb_mte_tagged(folio) &&
 				     !is_huge_zero_folio(folio));
 		else
-			WARN_ON_ONCE(!page_mte_tagged(page) && !is_zero_page(page));
+			WARN_ON_ONCE(!page_mte_tagged(page) && !is_zero_folio(folio));
 
 		/* limit access to the end of the page */
 		offset = offset_in_page(addr);
@@ -495,11 +495,11 @@ static int __access_remote_tags(struct mm_struct *mm, unsigned long addr,
 		maddr = page_address(page);
 		if (write) {
 			tags = mte_copy_tags_from_user(maddr + offset, buf, tags);
-			set_page_dirty_lock(page);
+			folio_mark_dirty_lock(folio);
 		} else {
 			tags = mte_copy_tags_to_user(buf, maddr + offset, tags);
 		}
-		put_page(page);
+		folio_put(folio);
 
 		/* error accessing the tracer's buffer */
 		if (!tags)
