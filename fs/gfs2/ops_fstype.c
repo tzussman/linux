@@ -1219,7 +1219,8 @@ static int gfs2_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (error)
 		goto fail_locking;
 
-	error = mempool_init_page_pool(&sdp->sd_log_buf_pool, 64, 0);
+	error = mempool_init_kmalloc_pool(&sdp->sd_log_buf_pool, 64,
+					  sdp->sd_sb.sb_bsize);
 	if (error)
 		goto fail_sb;
 
