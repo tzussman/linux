@@ -724,7 +724,7 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 	} else {
 		folio = read_mapping_folio(mapping, page_index, NULL);
 		if (IS_ERR(folio)) {
-			jfs_err("read_mapping_page failed!");
+			jfs_err("read_mapping_folio failed!");
 			return NULL;
 		}
 		folio_lock(folio);
