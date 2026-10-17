@@ -1795,7 +1795,7 @@ static int lbmLogInit(struct jfs_log * log)
 	log->wqueue = NULL;
 
 	/*
-	 * Each log has its own buffer pages allocated to it.  These are
+	 * Each log has its own buffers allocated to it.  These are
 	 * not managed by the page cache.  This ensures that a transaction
 	 * writing to the log does not block trying to allocate a page from
 	 * the page cache (for the log).  This would be bad, since page
@@ -1807,33 +1807,20 @@ static int lbmLogInit(struct jfs_log * log)
 
 	log->lbuf_free = NULL;
 
-	for (i = 0; i < LOGPAGES;) {
-		char *buffer;
-		uint offset;
-		struct page *page = alloc_page(GFP_KERNEL | __GFP_ZERO);
-
-		if (!page)
+	for (i = 0; i < LOGPAGES; i++) {
+		lbuf = kmalloc_obj(struct lbuf);
+		if (lbuf == NULL)
 			goto error;
-		buffer = page_address(page);
-		for (offset = 0; offset < PAGE_SIZE; offset += LOGPSIZE) {
-			lbuf = kmalloc_obj(struct lbuf);
-			if (lbuf == NULL) {
-				if (offset == 0)
-					__free_page(page);
-				goto error;
-			}
-			if (offset) /* we already have one reference */
-				get_page(page);
-			lbuf->l_offset = offset;
-			lbuf->l_ldata = buffer + offset;
-			lbuf->l_page = page;
-			lbuf->l_log = log;
-			init_waitqueue_head(&lbuf->l_ioevent);
-
-			lbuf->l_freelist = log->lbuf_free;
-			log->lbuf_free = lbuf;
-			i++;
+		lbuf->l_ldata = kzalloc(LOGPSIZE, GFP_KERNEL);
+		if (lbuf->l_ldata == NULL) {
+			kfree(lbuf);
+			goto error;
 		}
+		lbuf->l_log = log;
+		init_waitqueue_head(&lbuf->l_ioevent);
+
+		lbuf->l_freelist = log->lbuf_free;
+		log->lbuf_free = lbuf;
 	}
 
 	return (0);
@@ -1858,7 +1845,7 @@ static void lbmLogShutdown(struct jfs_log * log)
 	lbuf = log->lbuf_free;
 	while (lbuf) {
 		struct lbuf *next = lbuf->l_freelist;
-		__free_page(lbuf->l_page);
+		kfree(lbuf->l_ldata);
 		kfree(lbuf);
 		lbuf = next;
 	}
@@ -1971,7 +1958,7 @@ static int lbmRead(struct jfs_log * log, int pn, struct lbuf ** bpp)
 
 	bio = bio_alloc(file_bdev(log->bdev_file), 1, REQ_OP_READ, GFP_NOFS);
 	bio->bi_iter.bi_sector = bp->l_blkno << (log->l2bsize - 9);
-	__bio_add_page(bio, bp->l_page, LOGPSIZE, bp->l_offset);
+	bio_add_virt_nofail(bio, bp->l_ldata, LOGPSIZE);
 	BUG_ON(bio->bi_iter.bi_size != LOGPSIZE);
 
 	bio->bi_end_io = lbmIODone;
@@ -2117,7 +2104,7 @@ static void lbmStartIO(struct lbuf * bp)
 	bio = bio_alloc(bdev, 1, REQ_OP_WRITE | REQ_SYNC,
 			GFP_NOFS);
 	bio->bi_iter.bi_sector = bp->l_blkno << (log->l2bsize - 9);
-	__bio_add_page(bio, bp->l_page, LOGPSIZE, bp->l_offset);
+	bio_add_virt_nofail(bio, bp->l_ldata, LOGPSIZE);
 	BUG_ON(bio->bi_iter.bi_size != LOGPSIZE);
 
 	bio->bi_end_io = lbmIODone;
