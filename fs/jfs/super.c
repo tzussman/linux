@@ -517,6 +517,7 @@ static int jfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	inode->i_size = bdev_nr_bytes(sb->s_bdev);
 	inode->i_mapping->a_ops = &jfs_metapage_aops;
 	inode_fake_hash(inode);
+	/* Metapages are accessed through folio_address(), so no highmem. */
 	mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);
 
 	sbi->direct_inode = inode;

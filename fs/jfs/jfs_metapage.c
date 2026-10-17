@@ -102,7 +102,6 @@ static inline int insert_metapage(struct folio *folio, struct metapage *mp)
 		if (!a)
 			return -ENOMEM;
 		folio_attach_private(folio, a);
-		kmap(&folio->page);
 	}
 
 	if (mp) {
@@ -129,7 +128,6 @@ static inline void remove_metapage(struct folio *folio, struct metapage *mp)
 	if (--a->mp_count == 0) {
 		kfree(a);
 		folio_detach_private(folio);
-		kunmap(&folio->page);
 	}
 }
 
@@ -212,17 +210,14 @@ static inline struct metapage *folio_to_mp(struct folio *folio, int offset)
 
 static inline int insert_metapage(struct folio *folio, struct metapage *mp)
 {
-	if (mp) {
+	if (mp)
 		folio_attach_private(folio, mp);
-		kmap(&folio->page);
-	}
 	return 0;
 }
 
 static inline void remove_metapage(struct folio *folio, struct metapage *mp)
 {
 	folio_detach_private(folio);
-	kunmap(&folio->page);
 }
 
 #define inc_io(folio) do {} while(0)
@@ -405,7 +400,7 @@ static void last_write_complete(struct folio *folio, blk_status_t status)
 		}
 		/*
 		 * I'd like to call drop_metapage here, but I don't think it's
-		 * safe unless I have the page locked
+		 * safe unless I have the folio locked
 		 */
 	}
 	folio_end_writeback(folio);
@@ -652,7 +647,7 @@ static int metapage_migrate_folio(struct address_space *mapping,
 	if (!src->private)
 		return filemap_migrate_folio(mapping, dst, src, mode);
 
-	/* Check whether page does not have extra refs before we do more work */
+	/* Check whether folio does not have extra refs before we do more work */
 	expected_count = folio_expected_ref_count(src) + 1;
 	if (folio_ref_count(src) != expected_count)
 		return -EAGAIN;

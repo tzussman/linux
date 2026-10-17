@@ -467,6 +467,7 @@ struct inode *diReadSpecial(struct super_block *sb, ino_t inum, int secondary)
 	}
 
 	ip->i_mapping->a_ops = &jfs_metapage_aops;
+	/* Metapages are accessed through folio_address(), so no highmem. */
 	mapping_set_gfp_mask(ip->i_mapping, GFP_NOFS);
 
 	/* Allocations to metadata inodes should not affect quotas */
