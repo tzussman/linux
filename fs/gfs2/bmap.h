@@ -13,7 +13,6 @@
 
 struct inode;
 struct gfs2_inode;
-struct page;
 
 
 /**

@@ -447,7 +447,7 @@ static void gfs2_log_write_block(struct gfs2_sbd *sdp, void *buf)
  * gfs2_end_log_read - end I/O callback for reads from the log
  * @bio: The bio
  *
- * Simply unlock the pages in the bio. The main thread will wait on them and
+ * Simply unlock the folios in the bio. The main thread will wait on them and
  * process them in order as necessary.
  */
 static void gfs2_end_log_read(struct bio *bio)
@@ -465,7 +465,7 @@ static void gfs2_end_log_read(struct bio *bio)
 }
 
 /**
- * gfs2_jhead_folio_search - Look for the journal head in a given page.
+ * gfs2_jhead_folio_search - Look for the journal head in a given folio.
  * @jd: The journal descriptor
  * @head: The journal head to start from
  * @folio: The folio to look in
@@ -499,9 +499,9 @@ static bool gfs2_jhead_folio_search(struct gfs2_jdesc *jd,
 }
 
 /**
- * gfs2_jhead_process_page - Search/cleanup a page
+ * gfs2_jhead_process_folio - Search/cleanup a folio
  * @jd: The journal descriptor
- * @index: Index of the page to look into
+ * @index: Index of the folio to look into
  * @head: The journal head to start from
  * @done: If set, perform only cleanup, else search and set if found.
  *
@@ -518,9 +518,9 @@ static bool gfs2_jhead_folio_search(struct gfs2_jdesc *jd,
  * our references to the folio.
  */
 
-static void gfs2_jhead_process_page(struct gfs2_jdesc *jd, unsigned long index,
-				    struct gfs2_log_header_host *head,
-				    bool *done)
+static void gfs2_jhead_process_folio(struct gfs2_jdesc *jd, unsigned long index,
+				     struct gfs2_log_header_host *head,
+				     bool *done)
 {
 	struct folio *folio;
 
@@ -631,7 +631,7 @@ block_added:
 				continue;
 			}
 
-			gfs2_jhead_process_page(jd, blocks_read >> shift, head, &done);
+			gfs2_jhead_process_folio(jd, blocks_read >> shift, head, &done);
 			blocks_read += PAGE_SIZE >> bsize_shift;
 			if (done)
 				goto out;  /* found */
@@ -642,7 +642,7 @@ out:
 	if (bio)
 		submit_bio(bio);
 	while (blocks_read < block) {
-		gfs2_jhead_process_page(jd, blocks_read >> shift, head, &done);
+		gfs2_jhead_process_folio(jd, blocks_read >> shift, head, &done);
 		blocks_read += PAGE_SIZE >> bsize_shift;
 	}
 
