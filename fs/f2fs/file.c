@@ -214,7 +214,7 @@ static vm_fault_t f2fs_vm_page_mkwrite(struct vm_fault *vmf)
 	folio_lock(folio);
 	isize = i_size_read(inode);
 	folio_start = folio_pos(folio);
-	valid_end = min_t(loff_t, folio_start + folio_size(folio), isize);
+	valid_end = min_t(loff_t, folio_next_pos(folio), isize);
 	dirty_len = valid_end - folio_start;
 
 	/*
@@ -288,7 +288,7 @@ static vm_fault_t f2fs_vm_page_mkwrite(struct vm_fault *vmf)
 
 zero_tail:
 	/* page is wholly or partially inside EOF */
-	if (folio_start + folio_size(folio) > isize) {
+	if (folio_next_pos(folio) > isize) {
 		size_t offset = offset_in_folio(folio, isize);
 
 		folio_zero_segment(folio, offset, folio_size(folio));
