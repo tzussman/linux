@@ -1691,15 +1691,12 @@ struct compress_ctx {
 	pgoff_t cluster_idx;		/* cluster index number */
 	unsigned int cluster_size;	/* page count in cluster */
 	unsigned int log_cluster_size;	/* log of cluster size */
-	union {
-		struct page **rpages;	/* pages store raw data in cluster */
-		struct folio **rfolios;
-	};
-	unsigned int nr_rpages;		/* total page number in rpages */
+	struct folio **rfolios;		/* folios store raw data in cluster */
+	unsigned int nr_rfolios;	/* total folio number in rfolios */
 	struct page **cpages;		/* pages store compressed data in cluster */
 	unsigned int nr_cpages;		/* total page number in cpages */
 	unsigned int valid_nr_cblocks;	/* valid block number in cpages */
-	void *rbuf;			/* virtual mapped address on rpages */
+	void *rbuf;			/* virtual mapped address on rfolios */
 	struct compress_data *cbuf;	/* virtual mapped address on cpages */
 	size_t rlen;			/* valid data length in rbuf */
 	size_t clen;			/* valid data length in cbuf */
@@ -1712,11 +1709,8 @@ struct compress_ctx {
 struct compress_io_ctx {
 	u32 magic;			/* magic number to indicate page is compressed */
 	struct inode *inode;		/* inode the context belong to */
-	union {
-		struct page **rpages;	/* pages store raw data in cluster */
-		struct folio **rfolios;
-	};
-	unsigned int nr_rpages;		/* total page number in rpages */
+	struct folio **rfolios;		/* folios store raw data in cluster */
+	unsigned int nr_rfolios;	/* total folio number in rfolios */
 	atomic_t pending_blocks;	/* in-flight compressed block count */
 	struct page **cpages;		/* bounce pages store compressed data */
 	unsigned int nr_cpages;		/* total page number in cpages */
@@ -1730,16 +1724,13 @@ struct decompress_io_ctx {
 	pgoff_t cluster_idx;		/* cluster index number */
 	unsigned int cluster_size;	/* page count in cluster */
 	unsigned int log_cluster_size;	/* log of cluster size */
-	union {
-		struct page **rpages;	/* pages store raw data in cluster */
-		struct folio **rfolios;
-	};
-	unsigned int nr_rpages;		/* total page number in rpages */
+	struct folio **rfolios;		/* folios store raw data in cluster */
+	unsigned int nr_rfolios;	/* total folio number in rfolios */
 	struct page **cpages;		/* pages store compressed data in cluster */
 	unsigned int nr_cpages;		/* total page number in cpages */
 	unsigned int valid_nr_cblocks;	/* valid compressed block number */
 	struct page **tpages;		/* temp pages to pad holes in cluster */
-	void *rbuf;			/* virtual mapped address on rpages */
+	void *rbuf;			/* virtual mapped address on tpages */
 	struct compress_data *cbuf;	/* virtual mapped address on cpages */
 	size_t rlen;			/* valid data length in rbuf */
 	size_t clen;			/* valid data length in cbuf */
