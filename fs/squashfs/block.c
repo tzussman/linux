@@ -153,11 +153,8 @@ static int squashfs_bio_read_cached(struct bio *fullbio,
 						read_start >> PAGE_SHIFT,
 						GFP_NOIO);
 
-		if (!ret) {
-			folio_mark_uptodate(head_to_cache);
-			folio_unlock(head_to_cache);
-		}
-
+		if (!ret)
+			folio_end_read(head_to_cache, true);
 	}
 
 	if (tail_to_cache) {
@@ -165,10 +162,8 @@ static int squashfs_bio_read_cached(struct bio *fullbio,
 						(read_end >> PAGE_SHIFT) - 1,
 						GFP_NOIO);
 
-		if (!ret) {
-			folio_mark_uptodate(tail_to_cache);
-			folio_unlock(tail_to_cache);
-		}
+		if (!ret)
+			folio_end_read(tail_to_cache, true);
 	}
 
 #ifdef CONFIG_SQUASHFS_COMP_CACHE_FULL
@@ -182,10 +177,8 @@ static int squashfs_bio_read_cached(struct bio *fullbio,
 						(read_start >> PAGE_SHIFT) + idx,
 						GFP_NOIO);
 
-		if (!ret) {
-			folio_mark_uptodate(cache_folios[idx]);
-			folio_unlock(cache_folios[idx]);
-		}
+		if (!ret)
+			folio_end_read(cache_folios[idx], true);
 	}
 	kfree(cache_folios);
 out:
