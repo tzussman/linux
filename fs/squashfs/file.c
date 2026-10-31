@@ -476,18 +476,15 @@ static int squashfs_read_folio(struct file *file, struct folio *folio)
 {
 	struct inode *inode = folio->mapping->host;
 	struct squashfs_sb_info *msblk = inode->i_sb->s_fs_info;
-	int index = folio->index >> (msblk->block_log - PAGE_SHIFT);
-	int file_end = i_size_read(inode) >> msblk->block_log;
-	int expected = index == file_end ?
-			(i_size_read(inode) & (msblk->block_size - 1)) :
-			 msblk->block_size;
+	u64 index = folio_pos(folio) >> msblk->block_log;
+	u64 file_end = i_size_read(inode) >> msblk->block_log;
+	int expected = squashfs_block_bytes(inode, index);
 	int res = 0;
 
 	TRACE("Entered squashfs_readpage, page index %lx, start block %llx\n",
 				folio->index, squashfs_i(inode)->start);
 
-	if (folio->index >= ((i_size_read(inode) + PAGE_SIZE - 1) >>
-					PAGE_SHIFT))
+	if (folio_pos(folio) >= i_size_read(inode))
 		goto out;
 
 	if (index < file_end || squashfs_i(inode)->fragment_block ==
