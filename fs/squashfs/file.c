@@ -371,17 +371,24 @@ static inline int read_blocklist(struct inode *inode, int index, u64 *block)
 	return read_blocklist_ptrs(inode, index, &start, &offset, block);
 }
 
-static bool squashfs_fill_page(struct folio *folio,
+static bool squashfs_fill_folio(struct folio *folio,
 		struct squashfs_cache_entry *buffer, size_t offset,
 		size_t avail)
 {
-	size_t copied;
-	void *pageaddr;
+	size_t copied = 0;
 
-	pageaddr = kmap_local_folio(folio, 0);
-	copied = squashfs_copy_data(pageaddr, buffer, offset, avail);
-	memset(pageaddr + copied, 0, PAGE_SIZE - copied);
-	kunmap_local(pageaddr);
+	while (copied < avail) {
+		size_t len = min(avail - copied, PAGE_SIZE - offset_in_page(copied));
+		void *addr = kmap_local_folio(folio, copied);
+		size_t n = squashfs_copy_data(addr, buffer, offset + copied, len);
+
+		kunmap_local(addr);
+		copied += n;
+		if (n < len)
+			break;
+	}
+	if (copied < folio_size(folio))
+		folio_zero_segment(folio, copied, folio_size(folio));
 
 	flush_dcache_folio(folio);
 
@@ -396,23 +403,20 @@ void squashfs_copy_cache(struct folio *folio,
 	struct address_space *mapping = folio->mapping;
 	struct inode *inode = mapping->host;
 	struct squashfs_sb_info *msblk = inode->i_sb->s_fs_info;
-	int mask = (1 << (msblk->block_log - PAGE_SHIFT)) - 1;
-	pgoff_t i, start_index = folio->index & ~mask;
-	pgoff_t end_index = start_index | mask;
+	unsigned int nr = squashfs_pages_per_block(msblk);
+	pgoff_t i, start_index = squashfs_block_first_index(msblk, folio->index);
+	pgoff_t end_index = start_index + nr - 1;
 
 	/*
-	 * Loop copying datablock into pages.  As the datablock likely covers
-	 * many PAGE_SIZE pages (default block size is 128 KiB) explicitly
-	 * grab the pages from the page cache, except for the page that we've
-	 * been called to fill.
+	 * Loop copying datablock into folios.  As the datablock likely covers
+	 * many folios (default block size is 128 KiB) explicitly grab the
+	 * folios from the page cache, except for the folio that we've been
+	 * called to fill.
 	 */
-	for (i = start_index; i <= end_index && bytes > 0; i++,
-			bytes -= PAGE_SIZE, offset += PAGE_SIZE) {
+	for (i = start_index; i <= end_index && bytes > 0;) {
 		struct folio *push_folio;
-		size_t avail = buffer ? min(bytes, PAGE_SIZE) : 0;
+		size_t size = PAGE_SIZE, avail = 0;
 		bool updated = false;
-
-		TRACE("bytes %zu, i %lu, available_bytes %zu\n", bytes, i, avail);
 
 		push_folio = (i == folio->index) ? folio :
 			__filemap_get_folio(mapping, i,
@@ -420,16 +424,24 @@ void squashfs_copy_cache(struct folio *folio,
 					mapping_gfp_mask(mapping));
 
 		if (IS_ERR(push_folio))
-			continue;
+			goto next;
 
-		if (folio_test_uptodate(push_folio))
-			goto skip_folio;
+		size = folio_size(push_folio);
+		if (buffer)
+			avail = min(bytes, size);
 
-		updated = squashfs_fill_page(push_folio, buffer, offset, avail);
-skip_folio:
+		TRACE("bytes %zu, i %lu, available_bytes %zu\n", bytes, i, avail);
+
+		if (!folio_test_uptodate(push_folio))
+			updated = squashfs_fill_folio(push_folio, buffer, offset,
+						      avail);
 		folio_end_read(push_folio, updated);
 		if (i != folio->index)
 			folio_put(push_folio);
+next:
+		i += size / PAGE_SIZE;
+		bytes -= size;
+		offset += size;
 	}
 }
 
