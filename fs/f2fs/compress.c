@@ -632,6 +632,29 @@ static void *f2fs_vmap(struct page **pages, unsigned int count)
 	return buf;
 }
 
+/*
+ * Map @count order-0 folios to a contiguous virtual range. vm_map_ram()
+ * takes pages, so collect each folio's page in a temporary array.
+ */
+static void *f2fs_vmap_folios(struct f2fs_sb_info *sbi, struct folio **folios,
+		unsigned int count)
+{
+	struct page **pages;
+	void *buf;
+	int i;
+
+	pages = page_array_alloc(sbi, count);
+	if (!pages)
+		return NULL;
+
+	for (i = 0; i < count; i++)
+		pages[i] = folio_page(folios[i], 0);
+
+	buf = f2fs_vmap(pages, count);
+	page_array_free(sbi, pages, count);
+	return buf;
+}
+
 static void f2fs_vunmap(void *vaddr, unsigned int count)
 {
 	if (!vaddr)
@@ -677,7 +700,7 @@ static int f2fs_compress_pages(struct compress_ctx *cc)
 	for (i = 0; i < cc->nr_cpages; i++)
 		cc->cpages[i] = f2fs_compress_alloc_page();
 
-	cc->rbuf = f2fs_vmap(cc->rpages, nr_rfolios);
+	cc->rbuf = f2fs_vmap_folios(sbi, cc->rfolios, nr_rfolios);
 	if (!cc->rbuf) {
 		ret = -ENOMEM;
 		goto out_free_cpages;
