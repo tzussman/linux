@@ -6825,9 +6825,12 @@ retry_pud:
 	}
 	if (pmd_trans_huge(vmf.orig_pmd)) {
 		if (pmd_protnone(vmf.orig_pmd) && vma_is_accessible(vma)) {
-			if (userfaultfd_huge_pmd_rwp(vma, vmf.orig_pmd))
-				return do_huge_pmd_uffd_rwp(&vmf);
-			return do_huge_pmd_numa_page(&vmf);
+			if (userfaultfd_huge_pmd_rwp(vma, vmf.orig_pmd)) {
+				if (!(flags & FAULT_FLAG_UNSHARE))
+					return do_huge_pmd_uffd_rwp(&vmf);
+			} else {
+				return do_huge_pmd_numa_page(&vmf);
+			}
 		}
 
 		if ((flags & (FAULT_FLAG_WRITE|FAULT_FLAG_UNSHARE)) &&
