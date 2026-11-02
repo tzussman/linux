@@ -565,6 +565,7 @@ static int squashfs_readahead_fragment(struct inode *inode, struct page **page,
 	return 0;
 
 failed:
+	squashfs_finish_page(actor);
 	squashfs_page_actor_free(actor);
 
 out:
