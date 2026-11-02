@@ -587,7 +587,7 @@ static void squashfs_readahead(struct readahead_control *ractl)
 	loff_t file_end = i_size_read(inode) >> msblk->block_log;
 	unsigned int max_pages = 1UL << shift;
 
-	readahead_expand(ractl, start, (len | mask) + 1);
+	readahead_expand(ractl, start, round_up(len, msblk->block_size));
 
 	pages = kmalloc_array(max_pages, sizeof(void *), GFP_KERNEL);
 	if (!pages)
