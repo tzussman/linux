@@ -5175,7 +5175,8 @@ static int __resp_write_dt0_dix(struct scsi_cmnd *scp,
 static int __resp_write_dt0(struct scsi_cmnd *scp,
 			    struct sdebug_dev_info *devip,
 			    struct sdeb_store_info *sip, u64 lba, u32 num,
-			    u32 ei_lba, u8 group, bool lbp, int *scsi_status)
+			    u32 ei_lba, u8 group, bool lbp, bool atomic,
+			    int *scsi_status)
 {
 	int ret;
 
@@ -5191,7 +5192,7 @@ static int __resp_write_dt0(struct scsi_cmnd *scp,
 			return ret;
 	}
 
-	ret = do_device_access(sip, scp, 0, lba, num, group, true, false);
+	ret = do_device_access(sip, scp, 0, lba, num, group, true, atomic);
 	if (ret < 0)
 		*scsi_status = DID_ERROR << 16;
 
@@ -5286,11 +5287,11 @@ static int resp_write_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 	    (sdebug_dix && scsi_prot_sg_count(scp)) || lbp) {
 		sdeb_meta_write_lock(sip);
 		ret = __resp_write_dt0(scp, devip, sip, lba, num, ei_lba, group,
-				       lbp, &scsi_status);
+				       lbp, false, &scsi_status);
 		sdeb_meta_write_unlock(sip);
 	} else {
 		ret = __resp_write_dt0(scp, devip, sip, lba, num, ei_lba, group,
-				       lbp, &scsi_status);
+				       lbp, false, &scsi_status);
 	}
 
 	if (unlikely(-1 == ret))
@@ -6328,6 +6329,7 @@ static int resp_atomic_write(struct scsi_cmnd *scp,
 	u16 boundary, len;
 	u64 lba, lba_tmp;
 	bool lbp = scsi_debug_lbp();
+	int scsi_status = DID_ERROR << 16;
 	int ret;
 
 	if (!scsi_debug_atomic_write()) {
@@ -6384,17 +6386,18 @@ static int resp_atomic_write(struct scsi_cmnd *scp,
 	if (scsi_bufflen(scp) < len * sdebug_sector_size)
 		return DID_ERROR << 16;
 
-	if (lbp) {
+	if ((sdebug_dix && scsi_prot_sg_count(scp)) || lbp) {
 		sdeb_meta_write_lock(sip);
-		ret = do_device_access(sip, scp, 0, lba, len, 0, true, true);
-		map_region(sip, lba, len);
+		ret = __resp_write_dt0(scp, devip, sip, lba, len, 0, 0, lbp,
+				       true, &scsi_status);
 		sdeb_meta_write_unlock(sip);
 	} else {
-		ret = do_device_access(sip, scp, 0, lba, len, 0, true, true);
+		ret = __resp_write_dt0(scp, devip, sip, lba, len, 0, 0, lbp,
+				       true, &scsi_status);
 	}
 
 	if (unlikely(ret < 0))
-		return DID_ERROR << 16;
+		return scsi_status;
 	if (unlikely(ret != len * sdebug_sector_size))
 		return DID_ERROR << 16;
 
