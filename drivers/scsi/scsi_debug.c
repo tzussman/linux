@@ -4434,6 +4434,32 @@ static __be16 dif_compute_csum(const void *buf, int len)
 	return csum;
 }
 
+/*
+ * Generate the protection information for blocks written without any, as a
+ * device formatted with protection information does. The guard tag is only
+ * computed once if @same says that the blocks all hold the same data.
+ */
+static void dif_generate(struct sdeb_store_info *sip, u64 lba, u32 num,
+			 bool same)
+{
+	__be16 guard = 0;
+	u32 i;
+
+	if (!sip->dif_storep)
+		return;
+
+	for (i = 0; i < num; i++) {
+		struct t10_pi_tuple *sdt = dif_store(sip, lba + i);
+
+		if (!same || !i)
+			guard = dif_compute_csum(lba2fake_store(sip, lba + i),
+						 sdebug_sector_size);
+		sdt->guard_tag = guard;
+		sdt->app_tag = T10_PI_APP_ESCAPE;
+		sdt->ref_tag = cpu_to_be32(lower_32_bits(lba + i));
+	}
+}
+
 static int dif_verify(struct t10_pi_tuple *sdt, const void *data,
 		      sector_t sector, u32 ei_lba)
 {
@@ -5195,6 +5221,9 @@ static int __resp_write_dt0(struct scsi_cmnd *scp,
 	ret = do_device_access(sip, scp, 0, lba, num, group, true, atomic);
 	if (ret < 0)
 		*scsi_status = DID_ERROR << 16;
+	else if (!scsi_prot_sg_count(scp))
+		dif_generate(sip, lba, DIV_ROUND_UP(ret, sdebug_sector_size),
+			     false);
 
 	if (unlikely(lbp))
 		map_region(sip, lba, num);
@@ -5283,8 +5312,7 @@ static int resp_write_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
 				    "to DIF device\n");
 	}
 
-	if (sdebug_dev_is_zoned(devip) ||
-	    (sdebug_dix && scsi_prot_sg_count(scp)) || lbp) {
+	if (sdebug_dev_is_zoned(devip) || sdebug_dix || lbp) {
 		sdeb_meta_write_lock(sip);
 		ret = __resp_write_dt0(scp, devip, sip, lba, num, ei_lba, group,
 				       lbp, false, &scsi_status);
@@ -5473,6 +5501,10 @@ static int resp_write_scat(struct scsi_cmnd *scp,
 			sdev_printk(KERN_INFO, scp->device,
 			    "%s: write: cdb indicated=%llu, IO sent=%d bytes\n",
 			    my_name, num_by, ret);
+		if (!scsi_prot_sg_count(scp))
+			dif_generate(sip, lba,
+				     DIV_ROUND_UP(ret, sdebug_sector_size),
+				     false);
 
 		if (unlikely((sdebug_opts & SDEBUG_OPT_RECOV_DIF_DIX) &&
 			     atomic_read(&sdeb_inject_pending))) {
@@ -5564,6 +5596,7 @@ static int __resp_write_same(struct scsi_cmnd *scp, u64 lba, u32 num,
 		block = do_div(lbaa, sdebug_store_sectors);
 		memmove(fsp + (block * lb_size), fs1p, lb_size);
 	}
+	dif_generate(sip, lba, num, true);
 	if (lbp)
 		map_region(sip, lba, num);
 	/* If ZBC zone then bump its write pointer */
@@ -5584,7 +5617,7 @@ static int resp_write_same(struct scsi_cmnd *scp, u64 lba, u32 num, u32 ei_lba,
 	const bool lbp = scsi_debug_lbp();
 	int ret;
 
-	if (sdebug_dev_is_zoned(devip) || lbp) {
+	if (sdebug_dev_is_zoned(devip) || sdebug_dix || lbp) {
 		sdeb_meta_write_lock(sip);
 		ret = __resp_write_same(scp, lba, num, ei_lba, unmap, ndob,
 					lbp);
@@ -5753,6 +5786,7 @@ static int resp_comp_write(struct scsi_cmnd *scp,
 		retval = check_condition_result;
 		goto cleanup_unlock;
 	}
+	dif_generate(sip, lba, num, false);
 
 	/* Cover sip->map_storep (which map_region() sets) with the meta lock */
 	if (scsi_debug_lbp())
@@ -6386,7 +6420,7 @@ static int resp_atomic_write(struct scsi_cmnd *scp,
 	if (scsi_bufflen(scp) < len * sdebug_sector_size)
 		return DID_ERROR << 16;
 
-	if ((sdebug_dix && scsi_prot_sg_count(scp)) || lbp) {
+	if (sdebug_dix || lbp) {
 		sdeb_meta_write_lock(sip);
 		ret = __resp_write_dt0(scp, devip, sip, lba, len, 0, 0, lbp,
 				       true, &scsi_status);
