@@ -6612,6 +6612,29 @@ fini:
 	return res;
 }
 
+/*
+ * Zero the blocks of a zone that is being reset. The store can be smaller
+ * than the device, so wrap around at its end like do_device_access() does.
+ */
+static void zbc_zero_blocks(struct sdeb_store_info *sip, sector_t lba,
+			    sector_t num)
+{
+	/* One pass over the store zeroes all of it */
+	num = min_t(sector_t, num, sdebug_store_sectors);
+
+	while (num) {
+		sector_t block = lba;
+		u32 n;
+
+		block = sector_div(block, sdebug_store_sectors);
+		n = min_t(sector_t, num, sdebug_store_sectors - block);
+		memset(sip->storep + block * sdebug_sector_size, 0,
+		       (size_t)n * sdebug_sector_size);
+		lba += n;
+		num -= n;
+	}
+}
+
 static void zbc_rwp_zone(struct sdebug_dev_info *devip,
 			 struct sdeb_zone_state *zsp)
 {
@@ -6629,8 +6652,7 @@ static void zbc_rwp_zone(struct sdebug_dev_info *devip,
 		devip->nr_closed--;
 
 	if (zsp->z_wp > zsp->z_start)
-		memset(sip->storep + zsp->z_start * sdebug_sector_size, 0,
-		       (zsp->z_wp - zsp->z_start) * sdebug_sector_size);
+		zbc_zero_blocks(sip, zsp->z_start, zsp->z_wp - zsp->z_start);
 
 	zsp->z_non_seq_resource = false;
 	zsp->z_wp = zsp->z_start;
