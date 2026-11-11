@@ -2330,6 +2330,12 @@ struct pagemap_scan_private {
 	struct page_region __user *vec_out;
 };
 
+/* No page behind a poison marker can be written to or accessed. */
+static bool pagemap_scan_no_page(pte_t pte)
+{
+	return softleaf_is_poison_marker(softleaf_from_pte(pte));
+}
+
 static unsigned long pagemap_page_category(struct pagemap_scan_private *p,
 					   struct vm_area_struct *vma,
 					   unsigned long addr, pte_t pte)
@@ -2378,7 +2384,7 @@ static unsigned long pagemap_page_category(struct pagemap_scan_private *p,
 
 		categories = PAGE_IS_SWAPPED;
 
-		if (!pte_swp_uffd_any(pte)) {
+		if (!pte_swp_uffd_any(pte) && !pagemap_scan_no_page(pte)) {
 			if (userfaultfd_wp(vma))
 				categories |= PAGE_IS_WRITTEN;
 			if (userfaultfd_rwp(vma))
@@ -2554,7 +2560,7 @@ static unsigned long pagemap_hugetlb_category(struct vm_area_struct *vma,
 	} else {
 		categories |= PAGE_IS_SWAPPED;
 
-		if (!pte_swp_uffd_any(pte)) {
+		if (!pte_swp_uffd_any(pte) && !pagemap_scan_no_page(pte)) {
 			if (userfaultfd_wp(vma))
 				categories |= PAGE_IS_WRITTEN;
 			if (userfaultfd_rwp(vma))
@@ -2840,7 +2846,8 @@ static int pagemap_scan_pmd_entry(pmd_t *pmd, unsigned long start,
 			pte_t ptent = ptep_get(pte);
 
 			if ((pte_present(ptent) && pte_uffd(ptent)) ||
-			    pte_swp_uffd_any(ptent))
+			    pte_swp_uffd_any(ptent) ||
+			    pagemap_scan_no_page(ptent))
 				continue;
 			make_uffd_wp_pte(vma, addr, pte, ptent);
 			if (!flush_end)
@@ -2859,7 +2866,8 @@ static int pagemap_scan_pmd_entry(pmd_t *pmd, unsigned long start,
 			pte_t ptent = ptep_get(pte);
 
 			if ((pte_present(ptent) && pte_uffd(ptent)) ||
-			    pte_swp_uffd_any(ptent))
+			    pte_swp_uffd_any(ptent) ||
+			    pagemap_scan_no_page(ptent))
 				continue;
 			ret = pagemap_scan_output(p->cur_vma_category | PAGE_IS_WRITTEN,
 						  p, addr, &next);
