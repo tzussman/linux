@@ -2330,10 +2330,15 @@ struct pagemap_scan_private {
 	struct page_region __user *vec_out;
 };
 
-/* No page behind a poison marker can be written to or accessed. */
+/*
+ * No page behind a poison marker or a hwpoison entry can be written to or
+ * accessed.
+ */
 static bool pagemap_scan_no_page(pte_t pte)
 {
-	return softleaf_is_poison_marker(softleaf_from_pte(pte));
+	const softleaf_t entry = softleaf_from_pte(pte);
+
+	return softleaf_is_poison_marker(entry) || softleaf_is_hwpoison(entry);
 }
 
 static unsigned long pagemap_page_category(struct pagemap_scan_private *p,
