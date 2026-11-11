@@ -503,6 +503,8 @@ static inline long change_pmd_range(struct mmu_gather *tlb,
 	unsigned long next;
 	long pages = 0;
 	unsigned long nr_huge_updates = 0;
+	bool uffd_prot_resolve = cp_flags &
+		(MM_CP_UFFD_WP_RESOLVE | MM_CP_UFFD_RWP_RESOLVE);
 
 	pmd = pmd_offset(pud, addr);
 	do {
@@ -522,6 +524,14 @@ again:
 
 		_pmd = pmdp_get_lockless(pmd);
 		if (pmd_is_huge(_pmd)) {
+			/*
+			 * Nothing to resolve, see change_huge_pmd(). Do not
+			 * split the PMD for a part of it either.
+			 */
+			if (uffd_prot_resolve && pmd_present(_pmd) &&
+			    !pmd_uffd(_pmd) && pmd_write(_pmd))
+				goto next;
+
 			if ((next - addr != HPAGE_PMD_SIZE) ||
 			    pgtable_split_needed(vma, cp_flags)) {
 				__split_huge_pmd(vma, pmd, addr, false);
