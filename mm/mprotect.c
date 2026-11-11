@@ -220,6 +220,11 @@ static long change_softleaf_pte(struct vm_area_struct *vma,
 	softleaf_t entry = softleaf_from_pte(oldpte);
 	pte_t newpte;
 
+	/* Nothing to resolve. Markers are handled below. */
+	if (uffd_prot_resolve && !softleaf_is_marker(entry) &&
+	    !pte_swp_uffd(oldpte))
+		return 0;
+
 	if (softleaf_is_migration_write(entry)) {
 		const struct folio *folio = softleaf_to_folio(entry);
 
@@ -339,6 +344,8 @@ static long change_pte_range(struct mmu_gather *tlb,
 	bool prot_numa = cp_flags & MM_CP_PROT_NUMA;
 	bool uffd_rwp = cp_flags & MM_CP_UFFD_RWP;
 	bool uffd_wp = cp_flags & MM_CP_UFFD_WP;
+	bool uffd_prot_resolve = cp_flags &
+		(MM_CP_UFFD_WP_RESOLVE | MM_CP_UFFD_RWP_RESOLVE);
 	int nr_ptes;
 
 	tlb_change_page_size(tlb, PAGE_SIZE);
@@ -370,6 +377,10 @@ static long change_pte_range(struct mmu_gather *tlb,
 			 * to be promoted so future faults can be distinguished.
 			 */
 			if (uffd_rwp && pte_protnone(oldpte) && pte_uffd(oldpte))
+				continue;
+			/* Nothing to resolve, do not take the write bit away. */
+			if (uffd_prot_resolve && !pte_uffd(oldpte) &&
+			    pte_write(oldpte))
 				continue;
 
 			page = vm_normal_page(vma, addr, oldpte);

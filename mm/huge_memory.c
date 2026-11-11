@@ -2687,6 +2687,11 @@ static void change_non_present_huge_pmd(struct mm_struct *mm,
 	pmd_t newpmd;
 
 	VM_WARN_ON(!pmd_is_valid_softleaf(*pmd));
+
+	/* Nothing to resolve. */
+	if (uffd_prot_resolve && !pmd_swp_uffd(*pmd))
+		return;
+
 	if (softleaf_is_migration_write(entry)) {
 		const struct folio *folio = softleaf_to_folio(entry);
 
@@ -2757,6 +2762,9 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	if (prot_numa && pmd_protnone(*pmd))
 		goto unlock;
 	if ((cp_flags & MM_CP_UFFD_RWP) && pmd_protnone(*pmd) && pmd_uffd(*pmd))
+		goto unlock;
+	/* Nothing to resolve, do not take the write bit away. */
+	if (uffd_prot_resolve && !pmd_uffd(*pmd) && pmd_write(*pmd))
 		goto unlock;
 
 	if (prot_numa) {

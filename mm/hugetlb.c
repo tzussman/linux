@@ -6774,6 +6774,11 @@ long hugetlb_change_protection(struct vm_area_struct *vma,
 			struct folio *folio = softleaf_to_folio(entry);
 			pte_t newpte = pte;
 
+			/* Nothing to resolve. */
+			if ((uffd_wp_resolve || uffd_rwp_resolve) &&
+			    !pte_swp_uffd(pte))
+				goto next;
+
 			if (softleaf_is_migration_write(entry)) {
 				if (folio_test_anon(folio))
 					entry = make_readable_exclusive_migration_entry(
@@ -6808,6 +6813,10 @@ long hugetlb_change_protection(struct vm_area_struct *vma,
 
 			/* Already protnone with uffd bit set? Nothing to do. */
 			if (uffd_rwp && pte_protnone(pte) && huge_pte_uffd(pte))
+				goto next;
+			/* Nothing to resolve, do not take the write bit away. */
+			if ((uffd_wp_resolve || uffd_rwp_resolve) &&
+			    !huge_pte_uffd(pte) && huge_pte_write(pte))
 				goto next;
 
 			old_pte = huge_ptep_modify_prot_start(vma, address, ptep);

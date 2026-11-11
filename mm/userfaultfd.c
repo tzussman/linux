@@ -1057,9 +1057,9 @@ long uffd_wp_range(struct vm_area_struct *dst_vma,
 
 	/*
 	 * vma->vm_page_prot already reflects that uffd-wp is enabled for this
-	 * VMA (see userfaultfd_set_vm_flags()) and that all PTEs are supposed
-	 * to be write-protected as default whenever protection changes.
-	 * Try upgrading write permissions manually.
+	 * VMA (see userfaultfd_set_vm_flags()), so a PTE whose protection is
+	 * resolved comes out write-protected. PTEs without uffd state are
+	 * left alone. Try upgrading write permissions manually.
 	 */
 	if (!enable_wp && vma_wants_manual_pte_write_upgrade(dst_vma))
 		mm_cp_flags |= MM_CP_TRY_CHANGE_WRITABLE;
