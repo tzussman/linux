@@ -2170,6 +2170,18 @@ static inline int pmd_protnone(pmd_t pmd)
 #endif
 #endif /* CONFIG_ARCH_HAS_PTE_PROTNONE */
 
+/*
+ * Only an architecture where pud_present() is true for a PROT_NONE PUD leaf
+ * has to provide pud_protnone(). Elsewhere, page table walkers that check
+ * pud_present() never get to see such an entry.
+ */
+#ifndef pud_protnone
+static inline int pud_protnone(pud_t pud)
+{
+	return 0;
+}
+#endif
+
 #endif /* CONFIG_MMU */
 
 #ifdef CONFIG_HAVE_ARCH_HUGE_VMAP

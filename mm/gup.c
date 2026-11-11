@@ -672,6 +672,9 @@ static struct page *follow_huge_pud(struct vm_area_struct *vma,
 	    !can_follow_write_pud(pud, pfn_to_page(pfn), vma, flags))
 		return NULL;
 
+	if (pud_protnone(pud) && !gup_can_follow_protnone(vma, flags))
+		return NULL;
+
 	pfn += (addr & ~PUD_MASK) >> PAGE_SHIFT;
 	page = pfn_to_page(pfn);
 
