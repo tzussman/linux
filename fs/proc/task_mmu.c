@@ -2937,10 +2937,13 @@ static int pagemap_scan_hugetlb_entry(pte_t *ptep, unsigned long hmask,
 		goto out_unlock;
 
 	if (end != start + huge_page_size(hstate_vma(vma))) {
-		/* Partial HugeTLB page WP isn't possible. */
+		/*
+		 * Partial HugeTLB page WP isn't possible. Keep the -ENOSPC
+		 * of pagemap_scan_output(), so that the walk stops here and
+		 * walk_end stays at the start of this page.
+		 */
 		pagemap_scan_backout_range(p, start, end);
 		p->arg.walk_end = start;
-		ret = 0;
 		goto out_unlock;
 	}
 
@@ -3218,6 +3221,14 @@ static long do_pagemap_scan(struct mm_struct *mm, unsigned long uarg)
 			break;
 
 		if (p.arg.vec_len == 0 || p.found_pages == p.arg.max_pages)
+			break;
+
+		/*
+		 * pagemap_scan_hugetlb_entry() could not fit the HugeTLB
+		 * page at walk_start into max_pages. Another walk would stop
+		 * at the same page.
+		 */
+		if (p.arg.walk_end == walk_start)
 			break;
 	}
 
