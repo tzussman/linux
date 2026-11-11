@@ -437,10 +437,12 @@ static int __uprobe_write(struct vm_area_struct *vma,
 	copy_to_page(fw->page, insn_vaddr, insn, nbytes);
 
 	/*
-	 * When unregistering, we may only zap a PTE if uffd is disabled and
-	 * there are no unexpected folio references ...
+	 * When unregistering, we may only zap a PTE if uffd is disabled, the
+	 * PTE is not RWP-protected and there are no unexpected folio
+	 * references ...
 	 */
 	if (is_register || userfaultfd_missing(vma) ||
+	    userfaultfd_pte_rwp(vma, fw->pte) ||
 	    (folio_ref_count(folio) != folio_expected_ref_count(folio) + 1))
 		goto remap;
 
