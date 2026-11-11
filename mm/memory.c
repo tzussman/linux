@@ -5941,7 +5941,9 @@ fallback:
 	}
 
 	if (pmd_none(*vmf->pmd)) {
-		if (!needs_fallback && folio_test_pmd_mappable(folio)) {
+		/* No PMD mapping for userfaultfd, which needs per-page faults. */
+		if (!needs_fallback && !userfaultfd_armed(vma) &&
+		    folio_test_pmd_mappable(folio)) {
 			ret = do_set_pmd(vmf, folio, page);
 			if (ret != VM_FAULT_FALLBACK)
 				return ret;

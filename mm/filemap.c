@@ -50,6 +50,7 @@
 #include <linux/sched/mm.h>
 #include <linux/sysctl.h>
 #include <linux/pgalloc.h>
+#include <linux/userfaultfd_k.h>
 
 #include <asm/tlbflush.h>
 #include "internal.h"
@@ -3754,7 +3755,9 @@ static bool filemap_map_pmd(struct vm_fault *vmf, struct folio *folio,
 		return true;
 	}
 
-	if (pmd_none(*vmf->pmd) && folio_test_pmd_mappable(folio)) {
+	/* No PMD mapping for userfaultfd, see finish_fault(). */
+	if (pmd_none(*vmf->pmd) && folio_test_pmd_mappable(folio) &&
+	    !userfaultfd_armed(vmf->vma)) {
 		struct page *page = folio_file_page(folio, start);
 		vm_fault_t ret = do_set_pmd(vmf, folio, page);
 		if (!ret) {
