@@ -6683,6 +6683,34 @@ out_release_nounlock:
 }
 #endif /* CONFIG_USERFAULTFD */
 
+/* See can_change_pte_writable(). */
+static bool can_change_huge_pte_writable(struct vm_area_struct *vma, pte_t pte)
+{
+	struct folio *folio;
+
+	if (WARN_ON_ONCE(!vma_test(vma, VMA_WRITE_BIT)))
+		return false;
+
+	/* Don't touch entries that are not even readable. */
+	if (pte_protnone(pte))
+		return false;
+
+	/* Do we need write faults for uffd-wp tracking? */
+	if (userfaultfd_wp(vma) && huge_pte_uffd(pte))
+		return false;
+
+	/* hugetlb_wp() and make_huge_pte() never map a clean page writable. */
+	if (!huge_pte_dirty(pte))
+		return false;
+
+	if (vma_test(vma, VMA_SHARED_BIT))
+		return true;
+
+	/* hugetlb_wp() reuses an exclusive anonymous folio as well. */
+	folio = page_folio(pte_page(pte));
+	return folio_test_anon(folio) && PageAnonExclusive(&folio->page);
+}
+
 long hugetlb_change_protection(struct vm_area_struct *vma,
 		unsigned long address, unsigned long end,
 		pgprot_t newprot, unsigned long cp_flags)
@@ -6832,6 +6860,12 @@ long hugetlb_change_protection(struct vm_area_struct *vma,
 				pte = huge_pte_modify(pte, PAGE_NONE);
 				pte = arch_make_huge_pte(pte, shift, vma->vm_flags);
 			}
+
+			/* See change_pte_range(). */
+			if ((cp_flags & MM_CP_TRY_CHANGE_WRITABLE) &&
+			    !huge_pte_write(pte) &&
+			    can_change_huge_pte_writable(vma, pte))
+				pte = huge_pte_mkwrite(pte);
 
 			huge_ptep_modify_prot_commit(vma, address, ptep, old_pte, pte);
 			pages++;
