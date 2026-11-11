@@ -588,25 +588,34 @@ int split_vma(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	      unsigned long addr, int new_below);
 #endif
 
-static inline bool vma_wants_manual_pte_write_upgrade(struct vm_area_struct *vma)
-{
-	/*
-	 * We want to check manually if we can change individual PTEs writable
-	 * if we can't do that automatically for all PTEs in a mapping. For
-	 * private mappings, that's always the case when we have write
-	 * permissions as we properly have to handle COW.
-	 */
-	if (vma_test(vma, VMA_SHARED_BIT))
-		return vma_wants_writenotify(vma, vma->vm_page_prot);
-	return vma_test(vma, VMA_WRITE_BIT);
-}
-
 #ifdef CONFIG_MMU
 static inline pgprot_t vma_pgprot_modify(pgprot_t oldprot, vma_flags_t vma_flags)
 {
 	const pgprot_t prot = vma_flags_to_page_prot(vma_flags);
 
 	return pgprot_modify(oldprot, prot);
+}
+
+static inline bool vma_wants_manual_pte_write_upgrade(struct vm_area_struct *vma)
+{
+	pgprot_t vm_page_prot;
+
+	/*
+	 * We want to check manually if we can change individual PTEs writable
+	 * if we can't do that automatically for all PTEs in a mapping. For
+	 * private mappings, that's always the case when we have write
+	 * permissions as we properly have to handle COW.
+	 */
+	if (!vma_test(vma, VMA_SHARED_BIT))
+		return vma_test(vma, VMA_WRITE_BIT);
+
+	/*
+	 * Ask like vma_set_page_prot() does. vma->vm_page_prot may already be
+	 * the write-notify protection, which vma_wants_writenotify() takes
+	 * for a protection that pgprot_modify() does not preserve.
+	 */
+	vm_page_prot = vma_pgprot_modify(vma->vm_page_prot, vma->flags);
+	return vma_wants_writenotify(vma, vm_page_prot);
 }
 #endif
 
