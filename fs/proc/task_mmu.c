@@ -2786,6 +2786,21 @@ static int pagemap_scan_thp_entry(pmd_t *pmd, unsigned long start,
 		return -ENOENT;
 	}
 
+	/*
+	 * A file PMD loses the uffd bit when it is split. Let
+	 * change_pmd_range() split it now and install uffd-wp markers, as it
+	 * does for UFFDIO_WRITEPROTECT.
+	 */
+	if (!vma_is_anonymous(vma)) {
+		long err;
+
+		spin_unlock(ptl);
+		err = uffd_wp_range(vma, start, HPAGE_SIZE, true);
+		if (err < 0)
+			return err;
+		return ret;
+	}
+
 	make_uffd_wp_pmd(vma, start, pmd);
 	flush_tlb_range(vma, start, end);
 out_unlock:
