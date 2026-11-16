@@ -1088,6 +1088,7 @@ static void __gfs2_log_flush(struct gfs2_sbd *sdp, struct gfs2_glock *gl,
 	bool frozen = test_bit(SDF_FROZEN, &sdp->sd_flags);
 	unsigned int first_log_head;
 	unsigned int reserved_revokes = 0;
+	struct blk_plug plug;
 
 	trace_gfs2_log_flush(sdp, 1, flags);
 
@@ -1148,11 +1149,13 @@ repeat:
 	gfs2_ordered_write(sdp);
 	if (gfs2_withdrawn(sdp))
 		goto out_withdraw;
+
+	/* Plug so that the contiguous log bios merge into fewer requests. */
+	blk_start_plug(&plug);
 	lops_before_commit(sdp, tr);
-	if (gfs2_withdrawn(sdp))
-		goto out_withdraw;
-	if (sdp->sd_jdesc)
+	if (!gfs2_withdrawn(sdp) && sdp->sd_jdesc)
 		gfs2_log_submit_write(&sdp->sd_jdesc->jd_log_bio);
+	blk_finish_plug(&plug);
 	if (gfs2_withdrawn(sdp))
 		goto out_withdraw;
 
