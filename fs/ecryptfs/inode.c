@@ -687,6 +687,14 @@ static void ecryptfs_iattr_to_lower(struct iattr *lower_ia,
 	 */
 	if (lower_ia->ia_valid & (ATTR_KILL_SUID | ATTR_KILL_SGID))
 		lower_ia->ia_valid &= ~ATTR_MODE;
+	/*
+	 * ATTR_OPEN marks the size change of an open(O_TRUNC), and tells the
+	 * lower file system that the open already truncated the file. That is
+	 * not the case for the lower file: ecryptfs never opens it with
+	 * O_TRUNC, and its size is not 0 but the size of the headers. Clear
+	 * it, as overlayfs does.
+	 */
+	lower_ia->ia_valid &= ~ATTR_OPEN;
 }
 
 /**
