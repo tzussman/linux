@@ -63,7 +63,7 @@ int ecryptfs_write_lower_page_segment(struct inode *ecryptfs_inode,
 	int rc;
 
 	offset = (loff_t)folio_for_lower->index * PAGE_SIZE + offset_in_page;
-	virt = kmap_local_folio(folio_for_lower, 0);
+	virt = kmap_local_folio(folio_for_lower, offset_in_page);
 	rc = ecryptfs_write_lower(ecryptfs_inode, virt, offset, size);
 	if (rc > 0)
 		rc = 0;
