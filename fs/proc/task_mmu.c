@@ -2331,14 +2331,15 @@ struct pagemap_scan_private {
 };
 
 /*
- * No page behind a poison marker or a hwpoison entry can be written to or
- * accessed.
+ * No page behind a poison marker, a hwpoison entry, or a guard marker can
+ * be written to or accessed.
  */
 static bool pagemap_scan_no_page(pte_t pte)
 {
 	const softleaf_t entry = softleaf_from_pte(pte);
 
-	return softleaf_is_poison_marker(entry) || softleaf_is_hwpoison(entry);
+	return softleaf_is_poison_marker(entry) || softleaf_is_hwpoison(entry) ||
+	       softleaf_is_guard_marker(entry);
 }
 
 static unsigned long pagemap_page_category(struct pagemap_scan_private *p,
