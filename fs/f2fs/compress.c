@@ -1988,7 +1988,8 @@ static void f2fs_free_dic(struct decompress_io_ctx *dic,
 
 	if (dic->tpages) {
 		for (i = 0; i < nr_rfolios; i++) {
-			if (dic->tpages[i] == dic->rpages[i])
+			if (dic->rfolios[i] &&
+			    dic->tpages[i] == folio_page(dic->rfolios[i], 0))
 				continue;
 			if (!dic->tpages[i])
 				continue;
