@@ -1949,7 +1949,7 @@ struct decompress_io_ctx *f2fs_alloc_dic(struct compress_ctx *cc)
 	dic->vi = cc->vi;
 
 	for (i = 0; i < nr_rfolios; i++)
-		dic->rpages[i] = cc->rpages[i];
+		dic->rfolios[i] = cc->rfolios[i];
 	dic->nr_rpages = nr_rfolios;
 
 	dic->cpages = page_array_alloc(sbi, nr_cpages);
