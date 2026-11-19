@@ -2039,12 +2039,10 @@ static void f2fs_verify_cluster(struct work_struct *work)
 
 	/* Verify, update, and unlock the decompressed pages. */
 	for (i = 0; i < dic->nr_rpages; i++) {
-		struct page *rpage = dic->rpages[i];
-		struct folio *rfolio;
+		struct folio *rfolio = dic->rfolios[i];
 
-		if (!rpage)
+		if (!rfolio)
 			continue;
-		rfolio = page_folio(rpage);
 		if (fsverity_verify_folio(dic->vi, rfolio)) {
 			if (f2fs_is_multiblock_folio(dic->sbi, rfolio))
 				f2fs_ffs_mark_subrange_uptodate(rfolio, 0,
