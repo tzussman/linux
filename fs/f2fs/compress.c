@@ -820,21 +820,20 @@ void f2fs_decompress_cluster(struct decompress_io_ctx *dic, bool in_task)
 	 * the uptodate (possibly dirty) blocks is kept.
 	 */
 	for (i = 0; !ret && i < dic->nr_rpages; i++) {
-		struct page *rpage = dic->rpages[i];
-		struct folio *folio;
+		struct folio *folio = dic->rfolios[i];
 		pgoff_t lblk;
 		unsigned int b;
 
-		if (!rpage || dic->tpages[i] == rpage)
+		if (!folio || dic->tpages[i] == folio_page(folio, 0))
 			continue;
 
-		folio = page_folio(rpage);
 		lblk = f2fs_folio_lblk(sbi, folio);
 		for (b = 0; b < f2fs_blocks_per_folio(sbi, folio); b++) {
 			size_t off = F2FS_BLK_TO_BYTES(sbi, b);
 
 			if (!f2fs_ffs_test_blk_uptodate(folio, lblk + b))
-				memcpy_page(rpage, off, dic->tpages[i], off,
+				memcpy_page(folio_page(folio, 0), off,
+					    dic->tpages[i], off,
 					    F2FS_BLKSIZE(sbi));
 		}
 	}
