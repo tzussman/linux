@@ -1862,9 +1862,8 @@ static int f2fs_prepare_decomp_mem(struct decompress_io_ctx *dic,
 		 * partial truncate). Decompress it into a bounce page instead,
 		 * see f2fs_decompress_cluster().
 		 */
-		if (dic->rpages[i] &&
-		    !f2fs_folio_has_ffs(page_folio(dic->rpages[i]))) {
-			dic->tpages[i] = dic->rpages[i];
+		if (dic->rfolios[i] && !f2fs_folio_has_ffs(dic->rfolios[i])) {
+			dic->tpages[i] = folio_page(dic->rfolios[i], 0);
 			continue;
 		}
 
