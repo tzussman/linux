@@ -962,13 +962,12 @@ static bool cluster_has_invalid_data(struct compress_ctx *cc)
 	int i;
 
 	for (i = 0; i < nr_folios; i++) {
-		struct page *page = cc->rpages[i];
+		struct folio *folio = cc->rfolios[i];
 
-		f2fs_bug_on(sbi, !page);
+		f2fs_bug_on(sbi, !folio);
 
 		/* any block beyond EOF */
-		if (folio_pos(page_folio(page)) +
-		    folio_size(page_folio(page)) - F2FS_BLKSIZE(sbi) >= i_size)
+		if (folio_next_pos(folio) - F2FS_BLKSIZE(sbi) >= i_size)
 			return true;
 	}
 	return false;
