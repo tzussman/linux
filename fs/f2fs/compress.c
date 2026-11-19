@@ -1130,13 +1130,12 @@ static void set_cluster_writeback(struct compress_ctx *cc)
 	int i;
 
 	for (i = 0; i < nr_folios; i++) {
-		struct folio *folio;
+		struct folio *folio = cc->rfolios[i];
 
-		if (!cc->rpages[i])
+		if (!folio)
 			continue;
 
-		folio = page_folio(cc->rpages[i]);
-		set_page_writeback(cc->rpages[i]);
+		folio_start_writeback(folio);
 		/*
 		 * Attach a folio state before the I/O, as the raw write path
 		 * does, so that the write completion, which does not hold the
