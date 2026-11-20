@@ -850,7 +850,7 @@ void gfs2_write_log_header(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd,
 	if (gfs2_withdrawn(sdp))
 		return;
 
-	page = mempool_alloc(gfs2_page_pool, GFP_NOIO);
+	page = mempool_alloc(&sdp->sd_log_buf_pool, GFP_NOIO);
 	lh = page_address(page);
 	clear_page(lh);
 

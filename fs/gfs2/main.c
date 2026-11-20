@@ -16,7 +16,6 @@
 #include <linux/rcupdate.h>
 #include <linux/rculist_bl.h>
 #include <linux/atomic.h>
-#include <linux/mempool.h>
 
 #include "gfs2.h"
 #include "incore.h"
@@ -166,10 +165,6 @@ static int __init init_gfs2_fs(void)
 	if (!gfs2_freeze_wq)
 		goto fail_wq3;
 
-	gfs2_page_pool = mempool_create_page_pool(64, 0);
-	if (!gfs2_page_pool)
-		goto fail_mempool;
-
 	gfs2_register_debugfs();
 	error = register_filesystem(&gfs2_fs_type);
 	if (error)
@@ -187,8 +182,6 @@ static int __init init_gfs2_fs(void)
 fail_fs2:
 	unregister_filesystem(&gfs2_fs_type);
 fail_fs1:
-	mempool_destroy(gfs2_page_pool);
-fail_mempool:
 	destroy_workqueue(gfs2_freeze_wq);
 fail_wq3:
 	destroy_workqueue(gfs2_control_wq);
@@ -240,7 +233,6 @@ static void __exit exit_gfs2_fs(void)
 
 	rcu_barrier();
 
-	mempool_destroy(gfs2_page_pool);
 	kmem_cache_destroy(gfs2_trans_cachep);
 	kmem_cache_destroy(gfs2_qadata_cachep);
 	kmem_cache_destroy(gfs2_quotad_cachep);

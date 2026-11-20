@@ -229,7 +229,7 @@ static void gfs2_end_log_write(struct bio *bio)
 			gfs2_end_log_write_bh(sdp, folio, bvec->bv_offset,
 					bvec->bv_len, bio->bi_status);
 		else
-			mempool_free(page, gfs2_page_pool);
+			mempool_free(page, &sdp->sd_log_buf_pool);
 	}
 
 	bio_put(bio);
@@ -377,7 +377,7 @@ static void gfs2_log_write_bh(struct gfs2_sbd *sdp, struct buffer_head *bh)
  * @page: The struct page
  *
  * This writes the first block-sized part of the page into the log. Note
- * that the page must have been allocated from the gfs2_page_pool mempool
+ * that the page must have been allocated from the sd_log_buf_pool mempool
  * and that after this has been called, ownership has been transferred and
  * the page may be freed at any time.
  */
@@ -607,7 +607,7 @@ out:
 static struct page *gfs2_get_log_desc(struct gfs2_sbd *sdp, u32 ld_type,
 				      u32 ld_length, u32 ld_data1)
 {
-	struct page *page = mempool_alloc(gfs2_page_pool, GFP_NOIO);
+	struct page *page = mempool_alloc(&sdp->sd_log_buf_pool, GFP_NOIO);
 	struct gfs2_log_descriptor *ld = page_address(page);
 	clear_page(ld);
 	ld->ld_header.mh_magic = cpu_to_be32(GFS2_MAGIC);
@@ -696,7 +696,7 @@ static void gfs2_before_commit(struct gfs2_sbd *sdp, unsigned int limit,
 			if (buffer_escaped(bd2->bd_bh)) {
 				void *p;
 
-				page = mempool_alloc(gfs2_page_pool, GFP_NOIO);
+				page = mempool_alloc(&sdp->sd_log_buf_pool, GFP_NOIO);
 				p = page_address(page);
 				memcpy_from_folio(p, bd2->bd_bh->b_folio,
 						  bh_offset(bd2->bd_bh),
@@ -872,7 +872,7 @@ static void revoke_lo_before_commit(struct gfs2_sbd *sdp, struct gfs2_trans *tr)
 
 		if (offset + sizeof(u64) > sdp->sd_sb.sb_bsize) {
 			gfs2_log_write_page(sdp, page);
-			page = mempool_alloc(gfs2_page_pool, GFP_NOIO);
+			page = mempool_alloc(&sdp->sd_log_buf_pool, GFP_NOIO);
 			mh = page_address(page);
 			clear_page(mh);
 			mh->mh_magic = cpu_to_be32(GFS2_MAGIC);

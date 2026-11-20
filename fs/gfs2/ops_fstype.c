@@ -67,6 +67,7 @@ void free_sbd(struct gfs2_sbd *sdp)
 {
 	struct super_block *sb = sdp->sd_vfs;
 
+	mempool_exit(&sdp->sd_log_buf_pool);
 	free_percpu(sdp->sd_lkstats);
 	sb->s_fs_info = NULL;
 	kfree(sdp);
@@ -1217,6 +1218,10 @@ static int gfs2_fill_super(struct super_block *sb, struct fs_context *fc)
 	error = init_sb(sdp, silent);
 	if (error)
 		goto fail_locking;
+
+	error = mempool_init_page_pool(&sdp->sd_log_buf_pool, 64, 0);
+	if (error)
+		goto fail_sb;
 
 	/* Turn rgrplvb on by default if fs format is recent enough */
 	if (!sdp->sd_args.ar_got_rgrplvb && sdp->sd_sb.sb_fs_format > 1801)

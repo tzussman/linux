@@ -21,6 +21,7 @@
 #include <linux/lockref.h>
 #include <linux/rhashtable.h>
 #include <linux/mutex.h>
+#include <linux/mempool.h>
 
 #define DIO_WAIT	0x00000010
 #define DIO_METADATA	0x00000020
@@ -846,6 +847,7 @@ struct gfs2_sbd {
 	struct rw_semaphore sd_log_flush_lock;
 	atomic_t sd_log_in_flight;
 	wait_queue_head_t sd_log_flush_wait;
+	mempool_t sd_log_buf_pool;
 	int sd_log_error; /* First log error */
 
 	unsigned int sd_log_tail;
